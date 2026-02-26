@@ -1,0 +1,1176 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Plus, Trash2, Layers, LayoutList, MapPin, Globe, Palette, MousePointer2, 
+  GitCommit, Square, MoreHorizontal, Hash, Shapes, Maximize2, Zap, Info,
+  ChevronDown, ChevronUp, Package, Edit3, Eye, PlusCircle, Edit2, MinusCircle, ArrowRight, ShieldCheck, Box,
+  Database, FileText, X // Database-ikonet for 'None' geometri
+} from 'lucide-react';
+import { DataModel, Layer, ModelProperty, GeometryType, SharedType, ModelMetadata } from '../types';
+import { createEmptyProperty, createEmptyLayer, COLORS } from '../constants';
+import { compareModels, ModelChange, generateChangelog, getStructuredChanges } from '../utils/diffUtils';
+import { fetchModelHistory, fetchModelAtCommit, CommitInfo } from '../utils/githubService';
+import PropertyEditor from './PropertyEditor';
+import StylePreview from './StylePreview';
+import { ChangeRow } from './ChangeRow'; 
+
+interface ModelEditorProps {
+  model: DataModel;
+  baselineModel: DataModel | null;
+  githubConfig: { token: string; repo: string; path: string; branch: string };
+  onUpdate: (model: DataModel) => void;
+  onSetBaseline: (model: DataModel) => void;
+  t: any;
+  lang: string;
+}
+
+const DiffField: React.FC<{
+  label: string;
+  currentValue: any;
+  baselineValue: any;
+  reviewMode: boolean;
+  children: React.ReactNode;
+  className?: string;
+}> = ({ label, currentValue, baselineValue, reviewMode, children, className }) => {
+  const isChanged = reviewMode && baselineValue !== undefined && baselineValue !== null && currentValue !== baselineValue;
+  return (
+    <div className={className}>
+      <div className="flex items-center justify-between mb-2">
+        <label className="text-[10px] md:text-[11px] font-black uppercase tracking-[0.15em] text-slate-400 block">{label}</label>
+        {isChanged && (
+          <span className="text-[10px] text-rose-500 line-through font-bold animate-in fade-in slide-in-from-right-2">
+            {String(baselineValue)}
+          </span>
+        )}
+      </div>
+      <div className={`transition-all duration-300 ${isChanged ? 'ring-2 ring-amber-400 bg-amber-50 rounded-[20px] overflow-hidden' : ''}`}>
+        {children}
+      </div>
+    </div>
+  );
+};
+
+const COMMON_CRS = [
+  { code: 'EPSG:4326', name: 'WGS 84 (Global)' },
+  { code: 'EPSG:3857', name: 'Web Mercator (Online)' },
+  { code: 'EPSG:25832', name: 'EUREF89 UTM 32N (Sør)' },
+  { code: 'EPSG:25833', name: 'EUREF89 UTM 33N (Hele)' },
+  { code: 'EPSG:25835', name: 'EUREF89 UTM 35N (Øst)' },
+  { code: 'EPSG:4258', name: 'ETRS89 (Europa)' },
+];
+
+const PRESET_COLORS = [COLORS.primary, '#4F46E5', '#1A4B8C', '#1B6B4A', '#D97706', '#DC2626', '#7C3AED', '#475569'];
+
+const GEOM_ICONS: Record<string, any> = {
+  'Point': MapPin,
+  'LineString': GitCommit,
+  'Polygon': Square,
+  'MultiPoint': Hash,
+  'MultiLineString': Shapes,
+  'MultiPolygon': LayoutList,
+  'GeometryCollection': Package,
+  'None': Database // Brukes for atributtabeller
+};
+
+const uid = () => Math.random().toString(36).slice(2, 9);
+const createEmptySharedType = (name = ""): SharedType => ({
+  id: uid(),
+  name: name || "Ny Type",
+  description: "",
+  properties: []
+});
+
+const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubConfig, onUpdate, onSetBaseline, t, lang }) => {
+  const [activeTab, setActiveTab] = useState<'layers' | 'types'>('layers');
+  const [activeLayerId, setActiveLayerId] = useState<string>(model.layers[0]?.id || "");
+  const [activeSharedTypeId, setActiveSharedTypeId] = useState<string>("");
+  const [isStylingOpen, setIsStylingOpen] = useState(false);
+  const [isMetadataOpen, setIsMetadataOpen] = useState(false);
+  const [reviewMode, setReviewMode] = useState(false);
+  const [commitHistory, setCommitHistory] = useState<CommitInfo[]>([]);
+  const [isFetchingHistory, setIsFetchingHistory] = useState(false);
+  const [selectedSha, setSelectedSha] = useState<string>("");
+
+  const changes = reviewMode ? compareModels(baselineModel, model, t) : [];
+  const structuredChanges = reviewMode ? getStructuredChanges(changes) : null;
+
+  const stats = {
+    added: changes.filter(c => c.type === 'added').length,
+    modified: changes.filter(c => c.type === 'modified').length,
+    deleted: changes.filter(c => c.type === 'deleted').length,
+    total: changes.length
+  };
+
+  useEffect(() => {
+    if (reviewMode && githubConfig.repo && githubConfig.path && commitHistory.length === 0) {
+      loadHistory();
+    }
+  }, [reviewMode, githubConfig]);
+
+  const loadHistory = async () => {
+    setIsFetchingHistory(true);
+    try {
+      const history = await fetchModelHistory(githubConfig.token, githubConfig.repo, githubConfig.path, githubConfig.branch);
+      setCommitHistory(history);
+    } catch (e) {
+      console.error("Failed to fetch history:", e);
+    } finally {
+      setIsFetchingHistory(false);
+    }
+  };
+
+  const handleCompareVersion = async (sha: string) => {
+    setSelectedSha(sha);
+    if (!sha) return;
+    
+    try {
+      const historicalModel = await fetchModelAtCommit(githubConfig.token, githubConfig.repo, githubConfig.path, sha);
+      if (historicalModel) {
+        onSetBaseline(historicalModel);
+      }
+    } catch (e) {
+      console.error("Failed to fetch historical model:", e);
+    }
+  };
+
+  // --- LAYER LOGIC ---
+  const displayLayers = [...model.layers];
+  if (reviewMode && baselineModel) {
+    baselineModel.layers.forEach(bl => {
+      if (!model.layers.find(l => l.id === bl.id)) {
+        (displayLayers as any).push({ ...bl, isGhost: true });
+      }
+    });
+  }
+
+  useEffect(() => {
+    if (displayLayers.length > 0 && (!activeLayerId || !displayLayers.find(l => l.id === activeLayerId))) {
+      setActiveLayerId(displayLayers[0].id);
+    }
+  }, [model.layers, activeLayerId, displayLayers]);
+
+  const activeLayer = displayLayers.find(l => l.id === activeLayerId) || displayLayers[0];
+  const isGhostLayer = (activeLayer as any)?.isGhost;
+  const baselineLayer = baselineModel?.layers.find(l => l.id === activeLayerId);
+
+  const handleAddLayer = () => {
+    const newLayer = createEmptyLayer(`Layer ${model.layers.length + 1}`);
+    onUpdate({
+      ...model,
+      layers: [...model.layers, newLayer]
+    });
+    setActiveLayerId(newLayer.id);
+  };
+
+  const handleDeleteLayer = (id: string) => {
+    if (model.layers.length <= 1) return;
+    const newLayers = model.layers.filter(l => l.id !== id);
+    onUpdate({ ...model, layers: newLayers });
+    if (activeLayerId === id) setActiveLayerId(newLayers[0].id);
+  };
+
+  const handleUpdateLayer = (updatedLayer: Partial<Layer>) => {
+    onUpdate({
+      ...model,
+      layers: model.layers.map(l => l.id === (activeLayer?.id || activeLayerId) ? { ...l, ...updatedLayer } : l)
+    });
+  };
+
+  const handleAddProperty = () => {
+    if (!activeLayer) return;
+    handleUpdateLayer({
+      properties: [...activeLayer.properties, createEmptyProperty()]
+    });
+  };
+
+  const handleUpdateProperty = (updatedProp: ModelProperty) => {
+    handleUpdateLayer({
+      properties: activeLayer.properties.map(p => p.id === updatedProp.id ? updatedProp : p)
+    });
+  };
+
+  const handleDeleteProperty = (id: string) => {
+    handleUpdateLayer({
+      properties: activeLayer.properties.filter(p => p.id !== id)
+    });
+  };
+
+  const handleMoveProperty = (id: string, direction: 'up' | 'down') => {
+    const index = activeLayer.properties.findIndex(p => p.id === id);
+    if (index === -1) return;
+    
+    const newProps = [...activeLayer.properties];
+    if (direction === 'up' && index > 0) {
+      [newProps[index - 1], newProps[index]] = [newProps[index], newProps[index - 1]];
+    } else if (direction === 'down' && index < newProps.length - 1) {
+      [newProps[index + 1], newProps[index]] = [newProps[index], newProps[index + 1]];
+    } else {
+      return;
+    }
+    
+    handleUpdateLayer({ properties: newProps });
+  };
+
+  // --- SHARED TYPES LOGIC ---
+  const sharedTypes = model.sharedTypes || [];
+  
+  useEffect(() => {
+    if (activeTab === 'types' && sharedTypes.length > 0 && !activeSharedTypeId) {
+        setActiveSharedTypeId(sharedTypes[0].id);
+    }
+  }, [activeTab, sharedTypes, activeSharedTypeId]);
+
+  const activeSharedType = sharedTypes.find(t => t.id === activeSharedTypeId) || sharedTypes[0];
+
+  const handleAddSharedType = () => {
+    const newType = createEmptySharedType(`Type ${sharedTypes.length + 1}`);
+    onUpdate({
+      ...model,
+      sharedTypes: [...sharedTypes, newType]
+    });
+    setActiveSharedTypeId(newType.id);
+  };
+
+  const handleDeleteSharedType = (id: string) => {
+    const newTypes = sharedTypes.filter(t => t.id !== id);
+    onUpdate({ ...model, sharedTypes: newTypes });
+    if (activeSharedTypeId === id) setActiveSharedTypeId(newTypes[0]?.id || "");
+  };
+
+  const handleUpdateSharedType = (updatedType: Partial<SharedType>) => {
+    onUpdate({
+      ...model,
+      sharedTypes: sharedTypes.map(t => t.id === (activeSharedType?.id || activeSharedTypeId) ? { ...t, ...updatedType } : t)
+    });
+  };
+
+  const handleAddSharedProperty = () => {
+    if (!activeSharedType) return;
+    handleUpdateSharedType({
+      properties: [...activeSharedType.properties, createEmptyProperty()]
+    });
+  };
+
+  const handleUpdateSharedProperty = (updatedProp: ModelProperty) => {
+    if (!activeSharedType) return;
+    handleUpdateSharedType({
+      properties: activeSharedType.properties.map(p => p.id === updatedProp.id ? updatedProp : p)
+    });
+  };
+
+  const handleDeleteSharedProperty = (id: string) => {
+    if (!activeSharedType) return;
+    handleUpdateSharedType({
+      properties: activeSharedType.properties.filter(p => p.id !== id)
+    });
+  };
+
+  const handleMoveSharedProperty = (id: string, direction: 'up' | 'down') => {
+    if (!activeSharedType) return;
+    const index = activeSharedType.properties.findIndex(p => p.id === id);
+    if (index === -1) return;
+    
+    const newProps = [...activeSharedType.properties];
+    if (direction === 'up' && index > 0) {
+      [newProps[index - 1], newProps[index]] = [newProps[index], newProps[index - 1]];
+    } else if (direction === 'down' && index < newProps.length - 1) {
+      [newProps[index + 1], newProps[index]] = [newProps[index], newProps[index + 1]];
+    } else {
+      return;
+    }
+    
+    handleUpdateSharedType({ properties: newProps });
+  };
+
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 lg:p-12 w-full custom-scrollbar scroll-smooth">
+      {reviewMode && changes.length > 0 && structuredChanges && (
+        <div className="mb-8 bg-slate-900 rounded-[32px] overflow-hidden border border-slate-800 shadow-2xl animate-in slide-in-from-top-4 duration-500">
+           <div className="px-8 py-6 border-b border-slate-800 flex flex-col gap-6 bg-slate-800/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                   <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center text-indigo-400 border border-indigo-500/20">
+                     <GitCommit size={20} />
+                   </div>
+                   <div>
+                     <h4 className="text-sm font-black text-slate-100 uppercase tracking-widest">{t.review.reviewingChanges}</h4>
+                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{stats.total} {t.review.totalOperations}</p>
+                   </div>
+                </div>
+                <div className="flex items-center gap-4">
+                   <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest">
+                      <span className="flex items-center gap-1.5 text-emerald-400"><PlusCircle size={12}/> {stats.added}</span>
+                      <span className="flex items-center gap-1.5 text-amber-400"><Edit2 size={12}/> {stats.modified}</span>
+                      <span className="flex items-center gap-1.5 text-rose-400"><MinusCircle size={12}/> {stats.deleted}</span>
+                   </div>
+                </div>
+              </div>
+
+              {/* Stat Bar */}
+              <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden flex">
+                <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${(stats.added / stats.total) * 100}%` }} />
+                <div className="h-full bg-amber-500 transition-all duration-500" style={{ width: `${(stats.modified / stats.total) * 100}%` }} />
+                <div className="h-full bg-rose-500 transition-all duration-500" style={{ width: `${(stats.deleted / stats.total) * 100}%` }} />
+              </div>
+           </div>
+
+           <div className="p-8 space-y-8">
+              {/* Model Metadata Section */}
+              {structuredChanges.modelMeta.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
+                    <Package size={14} /> {t.review.modelMetadata}
+                  </div>
+                  <div className="space-y-2">
+                    {structuredChanges.modelMeta.map((change, idx) => (
+                      <ChangeRow key={`meta-${idx}`} change={change} t={t} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Layers Sections */}
+              {structuredChanges.layers.map((layerGroup) => (
+                <div key={layerGroup.layerId} className="space-y-4">
+                  <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
+                    <Layers size={14} /> {t.review.layer}: {layerGroup.layerName}
+                  </div>
+                  <div className="space-y-2">
+                    {layerGroup.layerChanges.map((change, idx) => (
+                      <ChangeRow key={`layer-${layerGroup.layerId}-${idx}`} change={change} t={t} />
+                    ))}
+                    {layerGroup.propertyChanges.map((change, idx) => (
+                      <ChangeRow key={`prop-${layerGroup.layerId}-${idx}`} change={change} isProperty t={t} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+           </div>
+        </div>
+      )}
+
+      {/* --- TOP TABS (LAYERS VS TYPES) --- */}
+      <div className="flex items-center gap-4 mb-8">
+        <div className="flex bg-slate-200/50 p-1.5 rounded-2xl">
+          <button 
+            onClick={() => setActiveTab('layers')}
+            className={`px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'layers' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Layers size={16} /> {t.layers}
+          </button>
+          <button 
+            onClick={() => setActiveTab('types')}
+            className={`px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'types' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Box size={16} /> {t.sharedTypes || 'Datatyper'}
+          </button>
+        </div>
+      </div>
+
+      {activeTab === 'layers' ? (
+        <>
+          <section className="bg-white rounded-[24px] md:rounded-[32px] border border-slate-200 shadow-sm p-5 md:p-8 mb-6 md:mb-10 relative">
+            <div className="flex flex-col gap-6 md:gap-8">
+              <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3 sm:gap-4 w-full border-b border-slate-100 pb-4 mb-2">
+                {reviewMode && githubConfig.repo && githubConfig.path && (
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 w-full sm:w-auto animate-in fade-in slide-in-from-right-4 duration-300">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{t.review.compareWith}</label>
+                    <div className="relative">
+                      <select 
+                        value={selectedSha} 
+                        onChange={e => handleCompareVersion(e.target.value)}
+                        className="w-full sm:min-w-[180px] appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 pr-10 text-[10px] font-bold text-slate-600 outline-none focus:border-indigo-500 transition-all cursor-pointer"
+                      >
+                        <option value="">{t.review.latestBaseline}</option>
+                        {commitHistory.map(commit => {
+                          const versionMatch = commit.message.match(/^\[(v[\d\.]+)\]/);
+                          const dateStr = new Date(commit.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                          
+                          if (versionMatch) {
+                            const version = versionMatch[1];
+                            const cleanMsg = commit.message.replace(versionMatch[0], '').trim();
+                            return (
+                              <option key={commit.sha} value={commit.sha}>
+                                {version} • {dateStr} • {cleanMsg.substring(0, 30)}...
+                              </option>
+                            );
+                          }
+                          
+                          return (
+                            <option key={commit.sha} value={commit.sha}>
+                              {dateStr} • {commit.sha.substring(0, 7)} • {commit.message.substring(0, 30)}...
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                        {isFetchingHistory ? (
+                          <div className="w-3 h-3 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+                        ) : (
+                          <ChevronDown size={14} />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <button 
+                  onClick={() => setReviewMode(!reviewMode)}
+                  className={`w-full sm:w-auto justify-center flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${reviewMode ? 'bg-amber-500 border-amber-500 text-white shadow-lg shadow-amber-200' : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'}`}
+                >
+                  <Eye size={14} />
+                  {reviewMode ? t.review.exitReview : t.review.reviewChanges}
+                </button>
+              </div>
+              <div className="flex-1 space-y-4 sm:space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+                  <DiffField label={t.modelName} currentValue={model.name} baselineValue={baselineModel?.name} reviewMode={reviewMode} className="lg:col-span-2">
+                    <input type="text" placeholder={t.modelNamePlaceholder} value={model.name} onChange={e => onUpdate({ ...model, name: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-3 text-sm md:text-base font-bold focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all" />
+                  </DiffField>
+                  <DiffField 
+                    label={
+                      <div className="flex items-center gap-2">
+                        {t.version}
+                        <span className="bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded text-[8px] tracking-widest uppercase font-black">AUTO</span>
+                      </div>
+                    } 
+                    currentValue={model.version} 
+                    baselineValue={baselineModel?.version} 
+                    reviewMode={reviewMode}
+                  >
+                    <input 
+                      type="text" 
+                      value={model.version} 
+                      readOnly 
+                      title="Version is updated automatically when publishing"
+                      className="w-full bg-slate-100 text-slate-500 cursor-not-allowed shadow-inner border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-3 text-sm md:text-base font-bold outline-none transition-all" 
+                    />
+                  </DiffField>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
+                  <DiffField label={t.namespace} currentValue={model.namespace} baselineValue={baselineModel?.namespace} reviewMode={reviewMode}>
+                    <input type="text" placeholder={t.namespacePlaceholder} value={model.namespace} onChange={e => onUpdate({ ...model, namespace: e.target.value.toLowerCase().replace(/\s+/g, '-') })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-3 text-xs md:text-sm font-mono text-indigo-700 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all" />
+                  </DiffField>
+                  <DiffField label={t.crsLabel} currentValue={model.crs} baselineValue={baselineModel?.crs} reviewMode={reviewMode}>
+                    <div className="space-y-3">
+                      <input type="text" list="crs-presets" placeholder={t.crsPlaceholder} value={model.crs || ''} onChange={e => onUpdate({ ...model, crs: e.target.value.toUpperCase() })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-3 text-sm md:text-base font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all" />
+                      <div className="flex flex-wrap gap-1.5 md:gap-2">
+                          {COMMON_CRS.slice(0, 5).map(crs => (
+                            <button key={crs.code} onClick={() => onUpdate({ ...model, crs: crs.code })} className={`px-2 md:px-2.5 py-1 rounded-lg text-[9px] md:text-[10px] font-black border transition-all ${model.crs === crs.code ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-500 hover:border-blue-300'}`}>
+                              {crs.code}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                    <datalist id="crs-presets">{COMMON_CRS.map(crs => <option key={crs.code} value={crs.code}>{crs.name}</option>)}</datalist>
+                  </DiffField>
+                </div>
+
+                <DiffField label={t.description} currentValue={model.description} baselineValue={baselineModel?.description} reviewMode={reviewMode}>
+                  <textarea placeholder={t.descriptionPlaceholder} value={model.description} onChange={e => onUpdate({ ...model, description: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-3 text-xs md:text-sm min-h-[60px] md:min-h-[80px] focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all resize-none leading-relaxed" />
+                </DiffField>
+              </div>
+            </div>
+          </section>
+
+          {/* METADATA SECTION (collapsible) */}
+          <section className="bg-white rounded-[24px] md:rounded-[32px] border border-slate-200 shadow-sm mb-6 md:mb-10 overflow-hidden transition-all">
+            <button
+              onClick={() => setIsMetadataOpen(!isMetadataOpen)}
+              className="w-full flex items-center justify-between p-5 md:p-8 hover:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center text-teal-600 border border-teal-100 shrink-0">
+                  <FileText size={20} />
+                </div>
+                <div className="text-left">
+                  <span className="text-sm font-black text-slate-800 block">{t.metadata?.sectionTitle || 'Publishing metadata'}</span>
+                  <span className="text-[10px] text-slate-400 font-medium">{t.metadata?.sectionHint || ''}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {model.metadata?.contactOrganization && (
+                  <span className="hidden sm:block text-[9px] bg-teal-100 text-teal-700 px-2 py-1 rounded-lg font-black uppercase tracking-tighter">
+                    {model.metadata.contactOrganization}
+                  </span>
+                )}
+                {isMetadataOpen ? <ChevronUp size={20} className="text-slate-300" /> : <ChevronDown size={20} className="text-slate-300" />}
+              </div>
+            </button>
+
+            {isMetadataOpen && (() => {
+              const md = t.metadata || {};
+              const meta: ModelMetadata = model.metadata || {
+                contactName: '', contactEmail: '', contactOrganization: '',
+                keywords: [], theme: '', license: 'CC-BY-4.0',
+                accessRights: 'public', purpose: '', accrualPeriodicity: 'unknown',
+                spatialExtent: { westBoundLongitude: '', eastBoundLongitude: '', southBoundLatitude: '', northBoundLatitude: '' },
+                temporalExtentFrom: '', temporalExtentTo: '',
+              };
+              const updateMeta = (patch: Partial<ModelMetadata>) => {
+                onUpdate({ ...model, metadata: { ...meta, ...patch } });
+              };
+              const keywordInput = React.createRef<HTMLInputElement>();
+
+              return (
+                <div className="px-5 md:px-8 pb-6 md:pb-8 space-y-6 border-t border-slate-100 animate-in fade-in slide-in-from-top-2 duration-300">
+                  
+                  {/* Contact */}
+                  <div className="pt-6 space-y-4">
+                    <h4 className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{md.contactName ? md.contactOrganization?.split(' ')[0] ? '' : '' : ''}{lang === 'no' ? 'Kontaktinformasjon' : 'Contact information'}</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.contactName}</label>
+                        <input type="text" value={meta.contactName} onChange={e => updateMeta({ contactName: e.target.value })} placeholder={md.contactNamePlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.contactEmail}</label>
+                        <input type="email" value={meta.contactEmail} onChange={e => updateMeta({ contactEmail: e.target.value })} placeholder={md.contactEmailPlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.contactOrganization}</label>
+                        <input type="text" value={meta.contactOrganization} onChange={e => updateMeta({ contactOrganization: e.target.value })} placeholder={md.contactOrganizationPlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Keywords */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{md.keywords}</label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {(meta.keywords || []).map((kw, i) => (
+                        <span key={i} className="inline-flex items-center gap-1.5 bg-teal-50 text-teal-700 border border-teal-200 px-3 py-1.5 rounded-xl text-xs font-bold">
+                          {kw}
+                          <button onClick={() => updateMeta({ keywords: meta.keywords.filter((_, idx) => idx !== i) })} className="text-teal-400 hover:text-teal-700 transition-colors"><X size={14} /></button>
+                        </span>
+                      ))}
+                    </div>
+                    <input
+                      ref={keywordInput}
+                      type="text"
+                      placeholder={md.keywordsPlaceholder}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && (e.target as HTMLInputElement).value.trim()) {
+                          e.preventDefault();
+                          const val = (e.target as HTMLInputElement).value.trim();
+                          if (!meta.keywords.includes(val)) {
+                            updateMeta({ keywords: [...(meta.keywords || []), val] });
+                          }
+                          (e.target as HTMLInputElement).value = '';
+                        }
+                      }}
+                    />
+                  </div>
+
+                  {/* Classification row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.theme}</label>
+                      <select value={meta.theme} onChange={e => updateMeta({ theme: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold appearance-none focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all cursor-pointer">
+                        <option value="">—</option>
+                        {Object.entries(md.themes || {}).map(([key, label]) => (
+                          <option key={key} value={key}>{label as string}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.license}</label>
+                      <select value={meta.license} onChange={e => updateMeta({ license: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold appearance-none focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all cursor-pointer">
+                        {Object.entries(md.licenses || {}).map(([key, label]) => (
+                          <option key={key} value={key}>{label as string}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.accessRights}</label>
+                      <select value={meta.accessRights} onChange={e => updateMeta({ accessRights: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold appearance-none focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all cursor-pointer">
+                        {Object.entries(md.accessRightsOptions || {}).map(([key, label]) => (
+                          <option key={key} value={key}>{label as string}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Purpose */}
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.purpose}</label>
+                    <textarea value={meta.purpose} onChange={e => updateMeta({ purpose: e.target.value })} placeholder={md.purposePlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-xs md:text-sm min-h-[60px] focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all resize-none leading-relaxed" />
+                  </div>
+
+                  {/* Frequency */}
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.accrualPeriodicity}</label>
+                    <select value={meta.accrualPeriodicity} onChange={e => updateMeta({ accrualPeriodicity: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold appearance-none focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all cursor-pointer">
+                      {Object.entries(md.frequencies || {}).map(([key, label]) => (
+                        <option key={key} value={key}>{label as string}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Spatial extent (bbox) */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{md.spatialExtent}</label>
+                    <div className="grid grid-cols-4 gap-3">
+                      {[
+                        { key: 'westBoundLongitude', label: md.west },
+                        { key: 'southBoundLatitude', label: md.south },
+                        { key: 'eastBoundLongitude', label: md.east },
+                        { key: 'northBoundLatitude', label: md.north },
+                      ].map(({ key, label }) => (
+                        <div key={key}>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">{label}</span>
+                          <input
+                            type="text"
+                            value={(meta.spatialExtent as any)?.[key] || ''}
+                            onChange={e => updateMeta({ spatialExtent: { ...meta.spatialExtent, [key]: e.target.value } })}
+                            placeholder="0.0"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Temporal extent */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.temporalFrom}</label>
+                      <input type="date" value={meta.temporalExtentFrom} onChange={e => updateMeta({ temporalExtentFrom: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.temporalTo}</label>
+                      <input type="date" value={meta.temporalExtentTo} onChange={e => updateMeta({ temporalExtentTo: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" />
+                    </div>
+                  </div>
+
+                </div>
+              );
+            })()}
+          </section>
+
+          <section className="mb-6 md:mb-8 pb-2">
+            <div className="flex items-center justify-between mb-4 px-2">
+              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">{t.layers}</h3>
+              <button onClick={handleAddLayer} className="text-xs font-black text-indigo-600 hover:underline flex items-center gap-1.5 shrink-0"><Plus size={14}/> {t.addLayer}</button>
+            </div>
+            <div className="flex flex-wrap gap-2 md:gap-3 px-1">
+                {displayLayers.map(layer => {
+                  const isGhost = (layer as any).isGhost;
+                  const layerChange = changes.find(c => c.itemType === 'layer' && c.layerId === layer.id);
+                  return (
+                    <button 
+                      key={layer.id} 
+                      onClick={() => setActiveLayerId(layer.id)} 
+                      className={`
+                        px-4 py-3 md:px-6 md:py-3.5 rounded-[16px] md:rounded-[20px] text-xs md:text-sm font-black transition-all border flex items-center gap-2 md:gap-3 whitespace-nowrap shrink-0 relative
+                        ${activeLayerId === layer.id ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-200' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:shadow-md'}
+                        ${isGhost ? 'opacity-50 border-rose-200 text-rose-500 line-through' : ''}
+                      `}
+                    >
+                      <div className="w-3 h-3 md:w-3.5 md:h-3.5 rounded-full border border-white/30" style={{ backgroundColor: layer.style?.simpleColor || '#ccc' }} />
+                      {layer.name || "Untitled Layer"}
+                      {reviewMode && (layerChange || isGhost) && (
+                        <span className={`absolute -top-2 -right-2 px-1.5 py-0.5 rounded-md text-[8px] font-black text-white shadow-sm ${isGhost ? 'bg-rose-600' : (layerChange?.type === 'added' ? 'bg-emerald-500' : 'bg-amber-500')}`}>
+                          {isGhost ? t.review.deleted.toUpperCase() : (layerChange?.type === 'added' ? t.review.added.toUpperCase() : t.review.modified.toUpperCase())}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+            </div>
+          </section>
+
+          {activeLayer && (
+            <section className={`space-y-6 md:space-y-8 animate-in fade-in duration-300 pb-24 ${isGhostLayer ? 'pointer-events-none grayscale-[0.5]' : ''}`}>
+              <div className="bg-white rounded-[24px] md:rounded-[32px] border border-slate-200 shadow-sm p-4 sm:p-6 md:p-8">
+                  <div className="flex items-center justify-between mb-5 md:mb-6">
+                    <div className="flex-1 relative group/layername">
+                      <DiffField label={t.layerName} currentValue={activeLayer.name} baselineValue={baselineLayer?.name} reviewMode={reviewMode}>
+                        <div className="flex items-center gap-2 group">
+                          <div className="relative flex-1">
+                              <input type="text" value={activeLayer.name} onChange={e => handleUpdateLayer({ name: e.target.value })} className={`w-full bg-slate-50 border-2 border-slate-100 hover:border-indigo-200 text-lg sm:text-xl md:text-2xl font-black px-4 py-3 rounded-2xl focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/5 outline-none placeholder:text-slate-200 transition-all ${isGhostLayer ? 'line-through text-rose-500' : ''}`} placeholder={t.layerNamePlaceholder} />
+                              {!isGhostLayer && <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-indigo-400 transition-colors pointer-events-none"><Edit3 size={18} /></div>}
+                          </div>
+                        </div>
+                      </DiffField>
+                    </div>
+                    {model.layers.length > 1 && !isGhostLayer && (
+                      <button onClick={() => handleDeleteLayer(activeLayer.id)} className="ml-3 sm:ml-4 p-3 rounded-xl text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-all"><Trash2 size={20} /></button>
+                    )}
+                  </div>
+                  
+                  <div className="bg-indigo-50/40 p-4 md:p-6 rounded-[20px] md:rounded-[28px] border border-indigo-100 mb-5 md:mb-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+                        <div className="space-y-3 md:space-y-4">
+                          <DiffField label={t.propGeometryType} currentValue={activeLayer.geometryType} baselineValue={baselineLayer?.geometryType} reviewMode={reviewMode}>
+                            {/* Updated 4x2 responsive grid for geometry types */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 md:gap-3">
+                              {Object.keys(t.geometryTypes).map((key) => {
+                                const Icon = GEOM_ICONS[key] || MousePointer2;
+                                const isNone = key === 'None';
+                                const isActive = activeLayer.geometryType === key;
+                                return (
+                                  <button 
+                                    key={key} 
+                                    onClick={() => handleUpdateLayer({ geometryType: key as GeometryType })} 
+                                    className={`flex flex-col items-center justify-center gap-2 p-3 md:p-4 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-wider border transition-all min-h-[70px] md:min-h-[80px]
+                                      ${isActive 
+                                        ? (isNone ? 'bg-slate-700 border-slate-700 text-white shadow-lg scale-[1.02]' : 'bg-indigo-600 border-indigo-600 text-white shadow-lg scale-[1.02]') 
+                                        : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300 hover:shadow-sm'}`}
+                                  >
+                                    <Icon size={20} className={isActive ? 'text-white' : 'text-slate-400'} />
+                                    <span className="w-full text-center leading-tight truncate px-1">
+                                      {t.geometryTypes[key as keyof typeof t.geometryTypes]}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </DiffField>
+                        </div>
+                        
+                        {activeLayer.geometryType !== 'None' ? (
+                          <div className="space-y-3 md:space-y-4">
+                              <DiffField label={t.geomColumnName} currentValue={activeLayer.geometryColumnName} baselineValue={baselineLayer?.geometryColumnName} reviewMode={reviewMode}>
+                                <input type="text" value={activeLayer.geometryColumnName} onChange={e => handleUpdateLayer({ geometryColumnName: e.target.value.toLowerCase().replace(/\s+/g, '_') })} className="w-full bg-white border border-slate-200 rounded-[16px] md:rounded-[20px] px-4 py-3 text-xs md:text-sm font-mono text-indigo-700 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all shadow-sm" />
+                              </DiffField>
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe size={12} /> {t.styling.followingModel} {model.crs}</p>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center h-full bg-slate-100/50 rounded-2xl border-2 border-dashed border-slate-200 p-6 animate-in fade-in zoom-in-95 duration-300">
+                            <div className="text-center">
+                              <Database size={24} className="mx-auto text-slate-400 mb-2" />
+                              <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                                {lang === 'no' ? 'Ren atributtabell' : 'Attribute Table Only'}
+                              </p>
+                              <p className="text-[9px] text-slate-400">
+                                {lang === 'no' 
+                                  ? 'Dette laget vil ikke ha geografiske egenskaper.' 
+                                  : 'This layer will not contain any spatial geometry features.'}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 rounded-[24px] md:rounded-[32px] mb-6 text-white overflow-hidden shadow-2xl transition-all">
+                    <button onClick={() => setIsStylingOpen(!isStylingOpen)} className="w-full flex items-center justify-between p-5 sm:p-6 md:p-8 text-left hover:bg-white/5 transition-all">
+                        <div className="flex items-center gap-3 sm:gap-4 md:gap-5">
+                          <div className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-[14px] md:rounded-[20px] bg-indigo-600 flex items-center justify-center shadow-2xl shadow-indigo-600/40 shrink-0"><Palette size={20} className="text-white md:w-[24px] md:h-[24px]" /></div>
+                          <div>
+                              <h4 className="text-xs sm:text-sm md:text-base font-black uppercase tracking-[0.1em] leading-none">{t.styling.title}</h4>
+                              <p className="text-[8px] sm:text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-[0.15em] mt-1.5 md:mt-2 opacity-60">{t.styling.unitHint}</p>
+                          </div>
+                        </div>
+                        {isStylingOpen ? <ChevronUp size={20} className="text-slate-500" /> : <ChevronDown size={20} className="text-slate-500" />}
+                    </button>
+
+                    {isStylingOpen && (
+                      <div className="px-4 sm:px-6 md:px-8 pb-6 sm:pb-8 md:pb-10 pt-2 animate-in slide-in-from-top-4 duration-500">
+                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 md:gap-10">
+                            <div className="xl:col-span-2 space-y-6 md:space-y-8">
+                              <div className="flex bg-slate-800 p-1 rounded-[18px] md:rounded-[24px] border border-slate-700 shadow-inner overflow-hidden">
+                                <button onClick={() => handleUpdateLayer({ style: { ...activeLayer.style, type: 'simple' }})} className={`flex-1 py-3 sm:py-3.5 md:py-4 rounded-[14px] md:rounded-[18px] text-[9px] sm:text-[10px] md:text-xs font-black uppercase tracking-[0.15em] transition-all ${activeLayer.style.type === 'simple' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}>{t.styling.modeSimple}</button>
+                                <button onClick={() => handleUpdateLayer({ style: { ...activeLayer.style, type: 'categorized' }})} className={`flex-1 py-3 sm:py-3.5 md:py-4 rounded-[14px] md:rounded-[18px] text-[9px] sm:text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${activeLayer.style.type === 'categorized' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}>{t.styling.modeCategorized}</button>
+                              </div>
+
+                              {activeLayer.style.type === 'simple' ? (
+                                <div className="space-y-6 md:space-y-8">
+                                    <div>
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 block mb-3">{t.styling.pickColor}</label>
+                                        <div className="flex flex-wrap gap-2 md:gap-3.5">
+                                            {PRESET_COLORS.map(c => (
+                                                <button key={c} onClick={() => handleUpdateLayer({ style: { ...activeLayer.style, simpleColor: c }})} className={`w-9 h-9 md:w-10 md:h-10 rounded-lg md:rounded-xl border-2 transition-all hover:scale-110 ${activeLayer.style.simpleColor === c ? 'border-white scale-110 shadow-2xl' : 'border-transparent opacity-80 hover:opacity-100'}`} style={{ backgroundColor: c }} />
+                                            ))}
+                                            <div className="w-9 h-9 md:w-10 md:h-10 rounded-lg md:rounded-xl bg-slate-800 border-2 border-slate-700 flex items-center justify-center relative overflow-hidden group/color">
+                                              <input type="color" value={activeLayer.style.simpleColor} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, simpleColor: e.target.value }})} className="absolute inset-0 w-full h-full scale-150 cursor-pointer border-none bg-transparent" />
+                                              <Palette size={16} className="text-slate-500 pointer-events-none z-10 group-hover/color:text-slate-300 transition-colors" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8 pt-6 md:pt-8 border-t border-slate-800/60">
+                                      {(activeLayer.geometryType.includes('Point') || activeLayer.geometryType === 'GeometryCollection') && (
+                                        <><div className="space-y-3 md:space-y-4">
+                                              <div className="flex justify-between items-end">
+                                                <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.pointSize}</label>
+                                                <span className="text-[10px] md:text-xs font-black text-indigo-500 mono bg-indigo-500/10 px-2 py-0.5 rounded-md">{activeLayer.style.pointSize || 8}px</span>
+                                              </div>
+                                              <input type="range" min="2" max="48" value={activeLayer.style.pointSize || 8} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, pointSize: parseInt(e.target.value) }})} className="w-full h-2 bg-slate-800 rounded-full appearance-none cursor-pointer accent-indigo-500" />
+                                          </div>
+                                          <div className="space-y-3 md:space-y-4">
+                                              <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.pointIcon}</label>
+                                              <div className="grid grid-cols-2 xs:grid-cols-4 gap-1.5 md:gap-2">
+                                                {Object.entries(t.styling.icons).map(([k, v]) => (<button key={k} onClick={() => handleUpdateLayer({ style: { ...activeLayer.style, pointIcon: k as any }})} className={`py-2.5 md:py-3 rounded-lg md:rounded-xl border text-[8px] md:text-[9px] font-black uppercase tracking-widest transition-all h-10 flex items-center justify-center ${activeLayer.style.pointIcon === k ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300'}`}>{v as string}</button>))}
+                                              </div>
+                                          </div></>
+                                      )}
+                                      {(activeLayer.geometryType.includes('Line') || activeLayer.geometryType.includes('Polygon') || activeLayer.geometryType === 'GeometryCollection') && (
+                                        <><div className="space-y-3 md:space-y-4">
+                                              <div className="flex justify-between items-end">
+                                                <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.lineWidth}</label>
+                                                <span className="text-[10px] md:text-xs font-black text-indigo-500 mono bg-indigo-500/10 px-2 py-0.5 rounded-md">{activeLayer.style.lineWidth || 2}px</span>
+                                              </div>
+                                              <input type="range" min="1" max="24" value={activeLayer.style.lineWidth || 2} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, lineWidth: parseInt(e.target.value) }})} className="w-full h-2 bg-slate-800 rounded-full appearance-none cursor-pointer accent-indigo-500" />
+                                          </div>
+                                          <div className="space-y-3 md:space-y-4">
+                                              <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.lineDash}</label>
+                                              <select value={activeLayer.style.lineDash || 'solid'} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, lineDash: e.target.value as any }})} className="w-full bg-slate-800 border border-slate-700 rounded-lg md:rounded-xl px-4 py-2.5 md:px-4 md:py-3 text-xs font-bold outline-none cursor-pointer hover:border-slate-500 transition-all h-11">
+                                                  {Object.entries(t.styling.dashes).map(([k, v]) => <option key={k} value={k}>{v as string}</option>)}
+                                              </select>
+                                          </div></>
+                                      )}
+                                      {(activeLayer.geometryType.includes('Polygon') || activeLayer.geometryType === 'GeometryCollection') && (
+                                          <><div className="space-y-3 md:space-y-4">
+                                                <div className="flex justify-between items-end">
+                                                  <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.fillOpacity}</label>
+                                                  <span className="text-[10px] md:text-xs font-black text-indigo-500 mono bg-indigo-500/10 px-2 py-0.5 rounded-md">{Math.round((activeLayer.style.fillOpacity || 0.5) * 100)}%</span>
+                                                </div>
+                                                <input type="range" min="0" max="1" step="0.01" value={activeLayer.style.fillOpacity || 0.5} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, fillOpacity: parseFloat(e.target.value) }})} className="w-full h-2 bg-slate-800 rounded-full appearance-none cursor-pointer accent-indigo-500" />
+                                            </div>
+                                            <div className="space-y-3 md:space-y-4">
+                                                <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.hatchStyle}</label>
+                                                <select value={activeLayer.style.hatchStyle || 'solid'} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, hatchStyle: e.target.value as any }})} className="w-full bg-slate-800 border border-slate-700 rounded-lg md:rounded-xl px-4 py-2.5 md:px-4 md:py-3 text-xs font-bold outline-none cursor-pointer hover:border-slate-500 transition-all h-11">
+                                                    {Object.entries(t.styling.hatches).map(([k, v]) => <option key={k} value={k}>{v as string}</option>)}
+                                                </select>
+                                            </div></>
+                                      )}
+                                    </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-5 md:space-y-6">
+                                    <div>
+                                      <label className="text-[10px] md:text-[11px] font-black uppercase tracking-widest text-slate-500 block mb-3">{t.styling.selectProperty}</label>
+                                      {codelistProps.length > 0 ? (
+                                        <select value={activeLayer.style.propertyId || ''} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, propertyId: e.target.value }})} className="w-full bg-slate-800 border border-slate-700 rounded-[18px] md:rounded-[20px] px-5 py-4 text-xs md:text-sm font-bold outline-none focus:border-indigo-500 transition-all h-12">
+                                          <option value="">-- {t.styling.selectProperty} --</option>
+                                          {codelistProps.map(p => <option key={p.id} value={p.id}>{p.title || p.name}</option>)}
+                                        </select>
+                                      ) : (
+                                        <div className="bg-slate-800/40 p-5 md:p-6 rounded-[18px] md:rounded-[20px] border border-slate-700/50 text-center"><p className="text-[10px] md:text-xs text-slate-500 font-bold italic">{t.styling.noCodelistProps}</p></div>
+                                      )}
+                                    </div>
+                                    {activeLayer.style.propertyId && (
+                                      <div className="bg-slate-800/50 rounded-[24px] md:rounded-[28px] p-4 md:p-6 space-y-3 md:space-y-4 border border-slate-700 max-h-[300px] md:max-h-[350px] overflow-y-auto custom-scrollbar shadow-inner">
+                                        <label className="text-[10px] md:text-[11px] font-black uppercase tracking-widest text-slate-400 block mb-2">{t.styling.colorsForValues}</label>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 md:gap-3">
+                                          {activeLayer.properties.find(p => p.id === activeLayer.style.propertyId)?.codelistValues.map(v => (
+                                            <div key={v.id} className="flex items-center justify-between bg-black/30 p-3 rounded-lg md:rounded-xl border border-slate-700/40 hover:border-slate-600 transition-all">
+                                              <span className="text-xs font-bold mono truncate max-w-[100px] md:max-w-[120px]">{v.label || v.code}</span>
+                                              <input type="color" value={activeLayer.style.categorizedColors?.[v.code] || COLORS.primary} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, categorizedColors: { ...(activeLayer.style.categorizedColors || {}), [v.code]: e.target.value } } })} className="w-10 h-8 rounded-lg bg-transparent border-none cursor-pointer hover:scale-110 transition-transform" />
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-4 md:gap-6 h-full justify-between">
+                              <div className="sticky top-6">
+                                <StylePreview layer={activeLayer} t={t} />
+                              </div>
+                            </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <textarea placeholder={t.descriptionPlaceholder} value={activeLayer.description} onChange={e => handleUpdateLayer({ description: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-4 md:px-5 md:py-4 text-xs md:text-sm min-h-[60px] md:min-h-[80px] focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all resize-none leading-relaxed" />
+              </div>
+
+              <div className="space-y-4 md:space-y-6">
+                  <div className="flex items-center justify-between mb-2 px-2">
+                    <div className="flex items-center gap-2 md:gap-3">
+                      <h2 className="text-base md:text-lg font-black text-slate-800 tracking-tight">{t.properties}</h2>
+                      <span className="bg-slate-100 text-slate-500 text-[10px] md:text-xs font-black px-3 py-1 rounded-full border border-slate-200 shadow-inner">{activeLayer.properties.length}</span>
+                    </div>
+                    <button onClick={handleAddProperty} className="text-xs font-black text-indigo-600 hover:underline flex items-center gap-1.5 shrink-0"><Plus size={14}/> {t.addProperty}</button>
+                  </div>
+
+                  {activeLayer.properties.length === 0 && !reviewMode ? (
+                    <div className="bg-white border-2 border-dashed border-slate-200 rounded-[24px] md:rounded-[40px] p-10 sm:p-16 md:p-24 text-center">
+                      <div className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-[20px] md:rounded-[28px] bg-slate-50 flex items-center justify-center text-slate-200 mx-auto mb-6 md:mb-8 shadow-inner"><LayoutList size={40} /></div>
+                      <p className="text-xs md:text-base font-bold text-slate-400 mb-6 md:mb-10">{t.noPropertiesHint}</p>
+                      <button onClick={handleAddProperty} className="bg-indigo-600 text-white font-black text-[10px] md:text-xs px-8 md:px-10 py-4 md:py-5 rounded-xl md:rounded-[24px] shadow-2xl shadow-indigo-200 hover:scale-105 transition-all uppercase tracking-[0.2em]">{t.addProperty}</button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 md:space-y-5 pb-16">
+                      {(() => {
+                        const displayProperties = [...activeLayer.properties];
+                        if (reviewMode && baselineLayer) {
+                          baselineLayer.properties.forEach(bp => {
+                            if (!activeLayer.properties.find(p => p.id === bp.id)) {
+                              (displayProperties as any).push({ ...bp, isGhost: true });
+                            }
+                          });
+                        }
+                        
+                        return displayProperties.map((prop, idx) => {
+                          const isGhost = (prop as any).isGhost;
+                          const propChange = changes.find(c => c.itemType === 'property' && c.propertyId === prop.id);
+                          const baselineProp = baselineLayer?.properties.find(p => p.id === prop.id);
+                          
+                          return (
+                            <PropertyEditor 
+                              key={prop.id} 
+                              prop={prop} 
+                              baselineProp={baselineProp}
+                              onUpdate={handleUpdateProperty} 
+                              onDelete={handleDeleteProperty} 
+                              onMove={(dir) => handleMoveProperty(prop.id, dir)} 
+                              isFirst={idx === 0} 
+                              isLast={idx === displayProperties.length - 1} 
+                              t={t} 
+                              allLayers={model.layers.map(l => ({ id: l.id, name: l.name }))}
+                              sharedTypes={sharedTypes}
+                              change={isGhost ? { type: 'deleted', itemType: 'property', itemName: prop.name } : propChange}
+                              isGhost={isGhost}
+                              reviewMode={reviewMode}
+                            />
+                          );
+                        });
+                      })()}
+                      {!isGhostLayer && <button onClick={handleAddProperty} className="w-full py-6 md:py-8 border-2 border-dashed border-slate-200 rounded-[18px] md:rounded-[24px] text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/50 transition-all flex items-center justify-center gap-3 active:scale-[0.99]"><Plus size={18} />{t.addProperty}</button>}
+                    </div>
+                  )}
+              </div>
+              
+              {/* --- ADVANCED VALIDATION (CROSS-FIELD CONSTRAINTS) --- */}
+              <div className="mt-8 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                <div className="px-5 py-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                  <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                    <ShieldCheck size={16} className="text-emerald-500" />
+                    {t.layerValidation?.title || 'Advanced Validation'}
+                  </h3>
+                </div>
+                
+                <div className="p-5 space-y-4">
+                  {(!activeLayer.layerConstraints || activeLayer.layerConstraints.length === 0) ? (
+                    <div className="text-center py-6 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                      <p className="text-sm text-slate-500 mb-3">{t.layerValidation?.noRules || 'No rules defined'}</p>
+                      <button
+                        onClick={() => handleUpdateLayer({
+                          layerConstraints: [{
+                            id: Math.random().toString(36).substring(2, 9),
+                            type: 'compare',
+                            fieldA: activeLayer.properties[0]?.name || '',
+                            operator: '>',
+                            fieldB: activeLayer.properties.length > 1 ? activeLayer.properties[1]?.name : (activeLayer.properties[0]?.name || ''),
+                            errorMessage: ''
+                          }]
+                        })}
+                        className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-700 hover:border-emerald-500 hover:text-emerald-600 transition-colors shadow-sm"
+                      >
+                        + {t.layerValidation?.addRule || 'Add Rule'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {activeLayer.layerConstraints.map((constraint, index) => (
+                        <div key={constraint.id} className="flex flex-wrap items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 relative group">
+                          
+                          {/* Field A */}
+                          <div className="flex-1 min-w-[120px]">
+                            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">{t.layerValidation?.field1 || 'Field 1'}</label>
+                            <select
+                              value={constraint.fieldA}
+                              onChange={(e) => {
+                                const newConstraints = [...activeLayer.layerConstraints!];
+                                newConstraints[index] = { ...constraint, fieldA: e.target.value };
+                                handleUpdateLayer({ layerConstraints: newConstraints });
+                              }}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                            >
+                              <option value="">-- {t.styling?.selectProperty || 'Select'} --</option>
+                              {activeLayer.properties.map(p => (
+                                <option key={p.id} value={p.name}>{p.name}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Operator */}
+                          <div className="w-24 shrink-0">
+                            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">{t.layerValidation?.operator || 'Operator'}</label>
+                            <select
+                              value={constraint.operator}
+                              onChange={(e) => {
+                                const newConstraints = [...activeLayer.layerConstraints!];
+                                newConstraints[index] = { ...constraint, operator: e.target.value as any };
+                                handleUpdateLayer({ layerConstraints: newConstraints });
+                              }}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-black text-slate-700 text-center focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 mono"
+                            >
+                              <option value=">">&gt;</option>
+                              <option value="<">&lt;</option>
+                              <option value=">=">&ge;</option>
+                              <option value="<=">&le;</option>
+                              <option value="==">==</option>
+                              <option value="!=">!=</option>
+                            </select>
+                          </div>
+
+                          {/* Field B */}
+                          <div className="flex-1 min-w-[120px]">
+                            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">{t.layerValidation?.field2 || 'Field 2'}</label>
+                            <select
+                              value={constraint.fieldB}
+                              onChange={(e) => {
+                                const newConstraints = [...activeLayer.layerConstraints!];
+                                newConstraints[index] = { ...constraint, fieldB: e.target.value };
+                                handleUpdateLayer({ layerConstraints: newConstraints });
+                              }}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                            >
+                              <option value="">-- {t.styling?.selectProperty || 'Select'} --</option>
+                              {activeLayer.properties.map(p => (
+                                <option key={p.id} value={p.name}>{p.name}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Custom Error Message */}
+                          <div className="w-full sm:flex-1 min-w-[200px]">
+                            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">{t.layerValidation?.errorMessage || 'Error Message'}</label>
+                            <input
+                              type="text"
+                              value={constraint.errorMessage || ''}
+                              onChange={(e) => {
+                                const newConstraints = [...activeLayer.layerConstraints!];
+                                newConstraints[index] = { ...constraint, errorMessage: e.target.value };
+                                handleUpdateLayer({ layerConstraints: newConstraints });
+                              }}
+                              placeholder={t.layerValidation?.errorMessagePlaceholder || 'Message...'}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 placeholder-slate-400 italic"
+                            />
+                          </div>
+
+                          {/* Delete Rule Button */}
+                          <div className="pt-5 shrink-0">
+                            <button
+                              onClick={() => {
+                                const newConstraints = activeLayer.layerConstraints!.filter(c => c.id !== constraint.id);
+                                handleUpdateLayer({ layerConstraints: newConstraints });
+                              }}
+                              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              title={t.layerValidation?.deleteRule || 'Delete'}
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                          
+                        </div>
+                      ))}
+                      
+                      {/* Add Another Rule Button */}
+                      <button
+                        onClick={() => {
+                          const newConstraints = [...(activeLayer.layerConstraints || []), {
+                            id: Math.random().toString(36).substring(2, 9),
+                            type: 'compare',
+                            fieldA: activeLayer.properties[0]?.name || '',
+                            operator: '>',
+                            fieldB: activeLayer.properties.length > 1 ? activeLayer.properties[1]?.name : (activeLayer.properties[0]?.name || ''),
+                            errorMessage: ''
+                          }];
+                          handleUpdateLayer({ layerConstraints: newConstraints as any });
+                        }}
+                        className="mt-4 px-3 py-1.5 text-sm font-bold text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-md transition-colors flex items-center gap-1"
+                      >
+                        <Plus size={14} /> {t.layerValidation?.addRule || 'Add Rule'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* --- END ADVANCED VALIDATION --- */}
+            </section>
+          )}
+        </>
+      ) : (
+        /* --- SHARED TYPES EDITOR TAB --- */
+        <section className="space-y-6 md:space-y-8 animate-in fade-in duration-300 pb-24">
+          <div className="flex items-center justify-between mb-4 px-2">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">{t.sharedTypes || 'Datatyper'}</h3>
+            <button onClick={handleAddSharedType} className="text-xs font-black text-indigo-600 hover:underline flex items-center gap-1.5 shrink-0"><Plus size={14}/> {t.addSharedType || 'Ny datatype'}</button>
+          </div>
+          
+          <div className="flex flex-wrap gap-2 md:gap-3 px-1 pb-4">
+            {sharedTypes.map(st => (
+              <button 
+                key={st.id} 
+                onClick={() => setActiveSharedTypeId(st.id)} 
+                className={`
+                  px-4 py-3 md:px-6 md:py-3.5 rounded-[16px] md:rounded-[20px] text-xs md:text-sm font-black transition-all border flex items-center gap-2 md:gap-3 whitespace-nowrap shrink-0 relative
+                  ${activeSharedTypeId === st.id ? 'bg-fuchsia-600 border-fuchsia-600 text-white shadow-xl shadow-fuchsia-200' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:shadow-md'}
+                `}
+              >
+                <div className="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                  <Box size={14} className={activeSharedTypeId === st.id ? 'text-white' : 'text-slate-400'} />
+                </div>
+                {st.name || "Untitled Type"}
+              </button>
+            ))}
+            {sharedTypes.length === 0 && (
+               <div className="text-xs text-slate-400 italic py-3 px-4">Ingen datatyper opprettet ennå.</div>
+            )}
+          </div>
+
+          {activeSharedType && (
+            <div className="bg-white rounded-[24px] md:rounded-[32px] border border-slate-200 shadow-sm p-4 sm:p-6 md:p-8">
+              <div className="flex items-center justify-between mb-5 md:mb-6">
+                <div className="flex-1 relative group/typename">
+                  <div className="flex items-center gap-2 group">
+                    <div className="relative flex-1">
+                        <label className="text-[10px] md:text-[11px] font-black uppercase tracking-[0.15em] text-slate-400 block mb-2">{t.sharedTypeName || 'Type Name'}</label>
+                        <input type="text" value={activeSharedType.name} onChange={e => handleUpdateSharedType({ name: e.target.value })} className={`w-full bg-slate-50 border-2 border-slate-100 hover:border-fuchsia-200 text-lg sm:text-xl md:text-2xl font-black px-4 py-3 rounded-2xl focus:bg-white focus:border-fuchsia-500 focus:ring-4 focus:ring-fuchsia-500/5 outline-none placeholder:text-slate-200 transition-all`} placeholder="f.eks. Adresse" />
+                    </div>
+                  </div>
+                </div>
+                <button onClick={() => handleDeleteSharedType(activeSharedType.id)} className="ml-3 sm:ml-4 p-3 rounded-xl text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-all self-end"><Trash2 size={20} /></button>
+              </div>
+
+              <textarea 
+                placeholder={t.sharedTypeDescriptionPlaceholder} 
+                value={activeSharedType.description} 
+                onChange={e => handleUpdateSharedType({ description: e.target.value })} 
+                className="w-full bg-slate-50 border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-4 md:px-5 md:py-4 text-xs md:text-sm min-h-[60px] md:min-h-[80px] focus:ring-4 focus:ring-fuchsia-500/10 focus:border-fuchsia-500 outline-none transition-all resize-none leading-relaxed mb-8" 
+              />
+
+              <div className="space-y-4 md:space-y-6">
+                <div className="flex items-center justify-between mb-2 px-2">
+                  <div className="flex items-center gap-2 md:gap-3">
+                    <h2 className="text-base md:text-lg font-black text-slate-800 tracking-tight">{t.properties} i {activeSharedType.name}</h2>
+                    <span className="bg-slate-100 text-slate-500 text-[10px] md:text-xs font-black px-3 py-1 rounded-full border border-slate-200 shadow-inner">{activeSharedType.properties.length}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-3 md:space-y-5">
+                  {activeSharedType.properties.map((prop, idx) => (
+                    <PropertyEditor 
+                      key={prop.id} 
+                      prop={prop} 
+                      onUpdate={handleUpdateSharedProperty} 
+                      onDelete={handleDeleteSharedProperty} 
+                      onMove={(dir) => handleMoveSharedProperty(prop.id, dir)} 
+                      isFirst={idx === 0} 
+                      isLast={idx === activeSharedType.properties.length - 1} 
+                      t={t} 
+                      allLayers={model.layers.map(l => ({ id: l.id, name: l.name }))}
+                      sharedTypes={sharedTypes.filter(st => st.id !== activeSharedType.id)} // Prevent self-referencing
+                    />
+                  ))}
+                  <button onClick={handleAddSharedProperty} className="w-full py-6 md:py-8 border-2 border-dashed border-slate-200 rounded-[18px] md:rounded-[24px] text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] hover:border-fuchsia-300 hover:text-fuchsia-600 hover:bg-fuchsia-50/50 transition-all flex items-center justify-center gap-3 active:scale-[0.99]"><Plus size={18} />{t.addProperty}</button>
+                </div>
+              </div>
+
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+};
+
+export default ModelEditor;
