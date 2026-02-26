@@ -36,6 +36,11 @@ const App: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   
+  // Right Panel Resizing States
+  const [previewWidth, setPreviewWidth] = useState(400);
+  const [isResizingPreview, setIsResizingPreview] = useState(false);
+  const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
+  
   const [models, setModels] = useState<DataModel[]>(() => {
     const saved = localStorage.getItem('models');
     return saved ? JSON.parse(saved) : [];
@@ -57,6 +62,15 @@ const App: React.FC = () => {
   const [quickPublishSummary, setQuickPublishSummary] = useState<InferredDataSummary | null>(null);
   const [isParsingGpkg, setIsParsingGpkg] = useState(false);
 
+  const isDesktop = windowWidth >= 1024;
+
+  // Track window resize for responsive checks
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -69,6 +83,37 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [historyIndex, historyLength]);
+
+  // Handle Drag Resizing for the Right Panel
+  useEffect(() => {
+    const handleResizePreview = (e: MouseEvent) => {
+      if (isResizingPreview) {
+        const newWidth = window.innerWidth - e.clientX;
+        // Keep the width between 300px and 60% of the screen
+        if (newWidth >= 300 && newWidth <= Math.max(800, window.innerWidth * 0.6)) {
+          setPreviewWidth(newWidth);
+        }
+      }
+    };
+
+    const stopResizingPreview = () => {
+      setIsResizingPreview(false);
+    };
+
+    if (isResizingPreview) {
+      window.addEventListener('mousemove', handleResizePreview);
+      window.addEventListener('mouseup', stopResizingPreview);
+      document.body.style.userSelect = 'none'; // Prevent text selection while dragging
+    } else {
+      document.body.style.userSelect = '';
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleResizePreview);
+      window.removeEventListener('mouseup', stopResizingPreview);
+      document.body.style.userSelect = '';
+    };
+  }, [isResizingPreview]);
 
   // Persist state
   useEffect(() => { localStorage.setItem('models', JSON.stringify(models)); }, [models]);
@@ -369,21 +414,34 @@ const App: React.FC = () => {
         <button 
           aria-label="Toggle Preview"
           onClick={() => setPreviewCollapsed(!previewCollapsed)}
-          className={`hidden lg:flex absolute top-1/2 -translate-y-1/2 right-0 z-[150] w-6 h-12 bg-white border border-slate-200 items-center justify-center rounded-l-xl shadow-md text-slate-400 hover:text-indigo-600 hover:bg-slate-50 transition-all duration-500
-            ${previewCollapsed ? 'translate-x-0' : '-translate-x-[400px] xl:-translate-x-[500px]'}
-          `}
+          style={isDesktop ? { 
+            transform: `translateY(-50%) translateX(${previewCollapsed ? 0 : -previewWidth}px)`,
+            transition: isResizingPreview ? 'none' : 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)' 
+          } : {}}
+          className={`hidden lg:flex absolute top-1/2 right-0 z-[150] w-6 h-12 bg-white border border-slate-200 items-center justify-center rounded-l-xl shadow-md text-slate-400 hover:text-indigo-600 hover:bg-slate-50`}
         >
           {previewCollapsed ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
         </button>
 
         <aside 
+          style={isDesktop ? { 
+            width: `${previewWidth}px`, 
+            marginRight: previewCollapsed ? `-${previewWidth}px` : '0px',
+          } : {}}
           className={`
             ${activeTab === 'preview' ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'} 
-            fixed lg:relative top-14 md:top-16 lg:top-0 bottom-16 lg:bottom-0 right-0 lg:right-auto w-full lg:w-[400px] xl:w-[500px] 
-            flex-none border-l border-slate-200 bg-white z-[130] lg:z-20 transition-all duration-500 cubic-bezier(0.4, 0, 0.2, 1) overflow-hidden
-            ${previewCollapsed ? 'lg:-mr-[400px] xl:-mr-[500px] opacity-0 pointer-events-none' : ''}
+            fixed lg:relative top-14 md:top-16 lg:top-0 bottom-16 lg:bottom-0 right-0 lg:right-auto w-full 
+            flex-none border-l border-slate-200 bg-white z-[130] lg:z-20 overflow-hidden
+            ${previewCollapsed ? 'opacity-0 pointer-events-none' : ''}
+            ${!isResizingPreview ? 'transition-all duration-500 cubic-bezier(0.4, 0, 0.2, 1)' : ''}
           `}
         >
+          {/* Resizer Handle */}
+          <div
+            onMouseDown={() => setIsResizingPreview(true)}
+            className={`hidden lg:block absolute top-0 left-0 w-1.5 h-full cursor-col-resize z-[160] hover:bg-indigo-400 transition-colors duration-150 ${isResizingPreview ? 'bg-indigo-500' : 'bg-transparent'}`}
+          />
+
           {selectedModel && (
             <PreviewPanel 
               model={selectedModel} 
