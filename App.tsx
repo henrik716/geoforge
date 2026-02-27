@@ -296,6 +296,7 @@ const App: React.FC = () => {
           onDropGpkg={handleGpkgDrop}
           onNewModel={handleNewModel}
           onImportFile={() => fileInputRef.current?.click()}
+          onImportUrl={() => setShowUrlImport(true)}
           onImportGithub={() => setShowGithubImport(true)}
           onSelectModel={(id) => {
             setSelectedId(id);
