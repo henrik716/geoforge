@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import {
   ChevronLeft, Check, Database, Tag, Github, Layers, ArrowRight,
-  RefreshCw, ExternalLink, Info, GitPullRequest, Download, X
+  RefreshCw, ExternalLink, Info, GitPullRequest, Download, X, Paintbrush
 } from 'lucide-react';
 import { DataModel, ModelMetadata } from '../types';
 import { InferredDataSummary } from '../utils/importUtils';
+import LayerStyleEditor from './LayerStyleEditor';
 import { generateDeployFiles, exportDeployKit } from '../utils/deployUtils';
 import { pushDeployKit, checkRepoAccess, DeployPushResult } from '../utils/githubService';
 
@@ -138,9 +139,21 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
     await exportDeployKit(publishModel, source, lang);
   };
 
+  // Helper: update a single layer's style
+  const updateLayerStyle = (layerId: string, partial: Partial<LayerStyle>) => {
+    onUpdateModel({
+      ...model,
+      layers: model.layers.map(l =>
+        l.id === layerId ? { ...l, style: { ...l.style, ...partial } } : l
+      ),
+    });
+  };
+
   // Step indicators
+  const st = t.styling || {};
   const steps = [
     { icon: Database, label: q.step1Title },
+    { icon: Paintbrush, label: q.stepStyleTitle || st.title },
     { icon: Tag, label: q.step2Title },
     { icon: Github, label: q.step3Title },
   ];
@@ -241,8 +254,51 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
         </div>
       )}
 
-      {/* STEP 1: Metadata */}
+      {/* STEP 1: Symbology */}
       {step === 1 && (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400">
+          <div className="space-y-2">
+            <h2 className="text-2xl font-black tracking-tight text-slate-900">{q.stepStyleTitle || st.title}</h2>
+            <p className="text-sm text-slate-400 font-medium">{q.stepStyleDesc}</p>
+          </div>
+
+          <div className="space-y-6">
+            {model.layers.filter(l => selectedLayers.has(l.id)).map((layer) => (
+              <div key={layer.id} className="bg-white rounded-2xl border-2 border-slate-200 p-5 space-y-4">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold bg-slate-100 text-slate-500`}>
+                    {GEOM_ICONS[layer.geometryType] || '◇'}
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-slate-900">{layer.name}</p>
+                    <p className="text-[10px] text-slate-400 font-medium">{layer.geometryType}</p>
+                  </div>
+                </div>
+                <LayerStyleEditor
+                  layer={layer}
+                  onUpdate={(partial) => updateLayerStyle(layer.id, partial)}
+                  t={t}
+                  variant="light"
+                  showPreview={true}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Navigation */}
+          <div className="flex items-center justify-between pt-4">
+            <button onClick={() => setStep(0)} className="px-6 py-3 rounded-2xl border-2 border-slate-200 text-slate-500 font-black text-xs uppercase tracking-widest hover:bg-slate-50 active:scale-95 transition-all">
+              {q.back}
+            </button>
+            <button onClick={() => setStep(2)} className="px-8 py-3.5 rounded-2xl bg-slate-900 text-white font-black text-xs uppercase tracking-[0.15em] hover:bg-slate-800 active:scale-95 transition-all shadow-lg flex items-center gap-2">
+              {q.next} <ArrowRight size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 2: Metadata */}
+      {step === 2 && (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400">
           <div className="space-y-2">
             <h2 className="text-2xl font-black tracking-tight text-slate-900">{q.step2Title}</h2>
@@ -326,18 +382,18 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
 
           {/* Navigation */}
           <div className="flex items-center justify-between pt-4">
-            <button onClick={() => setStep(0)} className="px-6 py-3 rounded-2xl border-2 border-slate-200 text-slate-500 font-black text-xs uppercase tracking-widest hover:bg-slate-50 active:scale-95 transition-all">
+            <button onClick={() => setStep(1)} className="px-6 py-3 rounded-2xl border-2 border-slate-200 text-slate-500 font-black text-xs uppercase tracking-widest hover:bg-slate-50 active:scale-95 transition-all">
               {q.back}
             </button>
-            <button onClick={() => setStep(2)} className="px-8 py-3.5 rounded-2xl bg-slate-900 text-white font-black text-xs uppercase tracking-[0.15em] hover:bg-slate-800 active:scale-95 transition-all shadow-lg flex items-center gap-2">
+            <button onClick={() => setStep(3)} className="px-8 py-3.5 rounded-2xl bg-slate-900 text-white font-black text-xs uppercase tracking-[0.15em] hover:bg-slate-800 active:scale-95 transition-all shadow-lg flex items-center gap-2">
               {q.next} <ArrowRight size={16} />
             </button>
           </div>
         </div>
       )}
 
-      {/* STEP 2: Publish */}
-      {step === 2 && (
+      {/* STEP 3: Publish */}
+      {step === 3 && (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400">
           <div className="space-y-2">
             <h2 className="text-2xl font-black tracking-tight text-slate-900">{q.step3Title}</h2>
@@ -451,7 +507,7 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
 
           {/* Actions */}
           <div className="flex items-center justify-between pt-4">
-            <button onClick={() => setStep(1)} className="px-6 py-3 rounded-2xl border-2 border-slate-200 text-slate-500 font-black text-xs uppercase tracking-widest hover:bg-slate-50 active:scale-95 transition-all">
+            <button onClick={() => setStep(2)} className="px-6 py-3 rounded-2xl border-2 border-slate-200 text-slate-500 font-black text-xs uppercase tracking-widest hover:bg-slate-50 active:scale-95 transition-all">
               {q.back}
             </button>
             <div className="flex items-center gap-3">

@@ -11,6 +11,7 @@ import { compareModels, ModelChange, generateChangelog, getStructuredChanges } f
 import { fetchModelHistory, fetchModelAtCommit, CommitInfo } from '../utils/githubService';
 import PropertyEditor from './PropertyEditor';
 import StylePreview from './StylePreview';
+import LayerStyleEditor from './LayerStyleEditor';
 import { ChangeRow } from './ChangeRow'; 
 
 interface ModelEditorProps {
@@ -58,7 +59,6 @@ const COMMON_CRS = [
   { code: 'EPSG:4258', name: 'ETRS89 (Europa)' },
 ];
 
-const PRESET_COLORS = [COLORS.primary, '#4F46E5', '#1A4B8C', '#1B6B4A', '#D97706', '#DC2626', '#7C3AED', '#475569'];
 
 const GEOM_ICONS: Record<string, any> = {
   'Point': MapPin,
@@ -769,110 +769,13 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
 
                     {isStylingOpen && (
                       <div className="px-4 sm:px-6 md:px-8 pb-6 sm:pb-8 md:pb-10 pt-2 animate-in slide-in-from-top-4 duration-500">
-                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 md:gap-10">
-                            <div className="xl:col-span-2 space-y-6 md:space-y-8">
-                              <div className="flex bg-slate-800 p-1 rounded-[18px] md:rounded-[24px] border border-slate-700 shadow-inner overflow-hidden">
-                                <button onClick={() => handleUpdateLayer({ style: { ...activeLayer.style, type: 'simple' }})} className={`flex-1 py-3 sm:py-3.5 md:py-4 rounded-[14px] md:rounded-[18px] text-[9px] sm:text-[10px] md:text-xs font-black uppercase tracking-[0.15em] transition-all ${activeLayer.style.type === 'simple' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}>{t.styling.modeSimple}</button>
-                                <button onClick={() => handleUpdateLayer({ style: { ...activeLayer.style, type: 'categorized' }})} className={`flex-1 py-3 sm:py-3.5 md:py-4 rounded-[14px] md:rounded-[18px] text-[9px] sm:text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${activeLayer.style.type === 'categorized' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}>{t.styling.modeCategorized}</button>
-                              </div>
-
-                              {activeLayer.style.type === 'simple' ? (
-                                <div className="space-y-6 md:space-y-8">
-                                    <div>
-                                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 block mb-3">{t.styling.pickColor}</label>
-                                        <div className="flex flex-wrap gap-2 md:gap-3.5">
-                                            {PRESET_COLORS.map(c => (
-                                                <button key={c} onClick={() => handleUpdateLayer({ style: { ...activeLayer.style, simpleColor: c }})} className={`w-9 h-9 md:w-10 md:h-10 rounded-lg md:rounded-xl border-2 transition-all hover:scale-110 ${activeLayer.style.simpleColor === c ? 'border-white scale-110 shadow-2xl' : 'border-transparent opacity-80 hover:opacity-100'}`} style={{ backgroundColor: c }} />
-                                            ))}
-                                            <div className="w-9 h-9 md:w-10 md:h-10 rounded-lg md:rounded-xl bg-slate-800 border-2 border-slate-700 flex items-center justify-center relative overflow-hidden group/color">
-                                              <input type="color" value={activeLayer.style.simpleColor} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, simpleColor: e.target.value }})} className="absolute inset-0 w-full h-full scale-150 cursor-pointer border-none bg-transparent" />
-                                              <Palette size={16} className="text-slate-500 pointer-events-none z-10 group-hover/color:text-slate-300 transition-colors" />
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8 pt-6 md:pt-8 border-t border-slate-800/60">
-                                      {(activeLayer.geometryType.includes('Point') || activeLayer.geometryType === 'GeometryCollection') && (
-                                        <><div className="space-y-3 md:space-y-4">
-                                              <div className="flex justify-between items-end">
-                                                <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.pointSize}</label>
-                                                <span className="text-[10px] md:text-xs font-black text-indigo-500 mono bg-indigo-500/10 px-2 py-0.5 rounded-md">{activeLayer.style.pointSize || 8}px</span>
-                                              </div>
-                                              <input type="range" min="2" max="48" value={activeLayer.style.pointSize || 8} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, pointSize: parseInt(e.target.value) }})} className="w-full h-2 bg-slate-800 rounded-full appearance-none cursor-pointer accent-indigo-500" />
-                                          </div>
-                                          <div className="space-y-3 md:space-y-4">
-                                              <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.pointIcon}</label>
-                                              <div className="grid grid-cols-2 xs:grid-cols-4 gap-1.5 md:gap-2">
-                                                {Object.entries(t.styling.icons).map(([k, v]) => (<button key={k} onClick={() => handleUpdateLayer({ style: { ...activeLayer.style, pointIcon: k as any }})} className={`py-2.5 md:py-3 rounded-lg md:rounded-xl border text-[8px] md:text-[9px] font-black uppercase tracking-widest transition-all h-10 flex items-center justify-center ${activeLayer.style.pointIcon === k ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300'}`}>{v as string}</button>))}
-                                              </div>
-                                          </div></>
-                                      )}
-                                      {(activeLayer.geometryType.includes('Line') || activeLayer.geometryType.includes('Polygon') || activeLayer.geometryType === 'GeometryCollection') && (
-                                        <><div className="space-y-3 md:space-y-4">
-                                              <div className="flex justify-between items-end">
-                                                <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.lineWidth}</label>
-                                                <span className="text-[10px] md:text-xs font-black text-indigo-500 mono bg-indigo-500/10 px-2 py-0.5 rounded-md">{activeLayer.style.lineWidth || 2}px</span>
-                                              </div>
-                                              <input type="range" min="1" max="24" value={activeLayer.style.lineWidth || 2} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, lineWidth: parseInt(e.target.value) }})} className="w-full h-2 bg-slate-800 rounded-full appearance-none cursor-pointer accent-indigo-500" />
-                                          </div>
-                                          <div className="space-y-3 md:space-y-4">
-                                              <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.lineDash}</label>
-                                              <select value={activeLayer.style.lineDash || 'solid'} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, lineDash: e.target.value as any }})} className="w-full bg-slate-800 border border-slate-700 rounded-lg md:rounded-xl px-4 py-2.5 md:px-4 md:py-3 text-xs font-bold outline-none cursor-pointer hover:border-slate-500 transition-all h-11">
-                                                  {Object.entries(t.styling.dashes).map(([k, v]) => <option key={k} value={k}>{v as string}</option>)}
-                                              </select>
-                                          </div></>
-                                      )}
-                                      {(activeLayer.geometryType.includes('Polygon') || activeLayer.geometryType === 'GeometryCollection') && (
-                                          <><div className="space-y-3 md:space-y-4">
-                                                <div className="flex justify-between items-end">
-                                                  <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.fillOpacity}</label>
-                                                  <span className="text-[10px] md:text-xs font-black text-indigo-500 mono bg-indigo-500/10 px-2 py-0.5 rounded-md">{Math.round((activeLayer.style.fillOpacity || 0.5) * 100)}%</span>
-                                                </div>
-                                                <input type="range" min="0" max="1" step="0.01" value={activeLayer.style.fillOpacity || 0.5} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, fillOpacity: parseFloat(e.target.value) }})} className="w-full h-2 bg-slate-800 rounded-full appearance-none cursor-pointer accent-indigo-500" />
-                                            </div>
-                                            <div className="space-y-3 md:space-y-4">
-                                                <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 block">{t.styling.hatchStyle}</label>
-                                                <select value={activeLayer.style.hatchStyle || 'solid'} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, hatchStyle: e.target.value as any }})} className="w-full bg-slate-800 border border-slate-700 rounded-lg md:rounded-xl px-4 py-2.5 md:px-4 md:py-3 text-xs font-bold outline-none cursor-pointer hover:border-slate-500 transition-all h-11">
-                                                    {Object.entries(t.styling.hatches).map(([k, v]) => <option key={k} value={k}>{v as string}</option>)}
-                                                </select>
-                                            </div></>
-                                      )}
-                                    </div>
-                                </div>
-                              ) : (
-                                <div className="space-y-5 md:space-y-6">
-                                    <div>
-                                      <label className="text-[10px] md:text-[11px] font-black uppercase tracking-widest text-slate-500 block mb-3">{t.styling.selectProperty}</label>
-                                      {codelistProps.length > 0 ? (
-                                        <select value={activeLayer.style.propertyId || ''} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, propertyId: e.target.value }})} className="w-full bg-slate-800 border border-slate-700 rounded-[18px] md:rounded-[20px] px-5 py-4 text-xs md:text-sm font-bold outline-none focus:border-indigo-500 transition-all h-12">
-                                          <option value="">-- {t.styling.selectProperty} --</option>
-                                          {codelistProps.map(p => <option key={p.id} value={p.id}>{p.title || p.name}</option>)}
-                                        </select>
-                                      ) : (
-                                        <div className="bg-slate-800/40 p-5 md:p-6 rounded-[18px] md:rounded-[20px] border border-slate-700/50 text-center"><p className="text-[10px] md:text-xs text-slate-500 font-bold italic">{t.styling.noCodelistProps}</p></div>
-                                      )}
-                                    </div>
-                                    {activeLayer.style.propertyId && (
-                                      <div className="bg-slate-800/50 rounded-[24px] md:rounded-[28px] p-4 md:p-6 space-y-3 md:space-y-4 border border-slate-700 max-h-[300px] md:max-h-[350px] overflow-y-auto custom-scrollbar shadow-inner">
-                                        <label className="text-[10px] md:text-[11px] font-black uppercase tracking-widest text-slate-400 block mb-2">{t.styling.colorsForValues}</label>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 md:gap-3">
-                                          {activeLayer.properties.find(p => p.id === activeLayer.style.propertyId)?.codelistValues.map(v => (
-                                            <div key={v.id} className="flex items-center justify-between bg-black/30 p-3 rounded-lg md:rounded-xl border border-slate-700/40 hover:border-slate-600 transition-all">
-                                              <span className="text-xs font-bold mono truncate max-w-[100px] md:max-w-[120px]">{v.label || v.code}</span>
-                                              <input type="color" value={activeLayer.style.categorizedColors?.[v.code] || COLORS.primary} onChange={e => handleUpdateLayer({ style: { ...activeLayer.style, categorizedColors: { ...(activeLayer.style.categorizedColors || {}), [v.code]: e.target.value } } })} className="w-10 h-8 rounded-lg bg-transparent border-none cursor-pointer hover:scale-110 transition-transform" />
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex flex-col gap-4 md:gap-6 h-full justify-between">
-                              <div className="sticky top-6">
-                                <StylePreview layer={activeLayer} t={t} />
-                              </div>
-                            </div>
-                        </div>
+                        <LayerStyleEditor
+                          layer={activeLayer}
+                          onUpdate={(partial) => handleUpdateLayer({ style: { ...activeLayer.style, ...partial } })}
+                          t={t}
+                          variant="dark"
+                          showPreview={true}
+                        />
                       </div>
                     )}
                   </div>
