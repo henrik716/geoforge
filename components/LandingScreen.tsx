@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Upload, PenTool, Github, FileUp, Plus, ArrowRight, Database, Loader2, Layers } from 'lucide-react';
+import { Upload, PenTool, Github, Plus, ArrowRight, Database, Loader2, Layers, Globe } from 'lucide-react';
 import { DataModel } from '../types';
 
 interface LandingScreenProps {
@@ -8,13 +8,14 @@ interface LandingScreenProps {
   onDropGpkg: (file: File) => void;
   onNewModel: () => void;
   onImportFile: () => void;
+  onImportUrl: () => void;
   onImportGithub: () => void;
   onSelectModel: (id: string) => void;
   isParsing: boolean;
 }
 
 const LandingScreen: React.FC<LandingScreenProps> = ({
-  t, models, onDropGpkg, onNewModel, onImportFile, onImportGithub, onSelectModel, isParsing
+  t, models, onDropGpkg, onNewModel, onImportFile, onImportUrl, onImportGithub, onSelectModel, isParsing
 }) => {
   const l = t.landing || {};
   const [isDragOver, setIsDragOver] = useState(false);
@@ -126,9 +127,20 @@ const LandingScreen: React.FC<LandingScreenProps> = ({
                 className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 text-left transition-all group/btn"
               >
                 <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 group-hover/btn:bg-indigo-100 group-hover/btn:text-indigo-500 transition-colors">
-                  <FileUp size={20} />
+                  <Layers size={20} />
                 </div>
                 <span className="text-sm font-bold text-slate-700">{l.modelImportFile}</span>
+                <ArrowRight size={16} className="ml-auto text-slate-300 group-hover/btn:text-indigo-400 transition-colors" />
+              </button>
+
+              <button
+                onClick={onImportUrl}
+                className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 text-left transition-all group/btn"
+              >
+                <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 group-hover/btn:bg-indigo-100 group-hover/btn:text-indigo-500 transition-colors">
+                  <Globe size={20} />
+                </div>
+                <span className="text-sm font-bold text-slate-700">{l.modelImportUrl}</span>
                 <ArrowRight size={16} className="ml-auto text-slate-300 group-hover/btn:text-indigo-400 transition-colors" />
               </button>
 

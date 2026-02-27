@@ -802,7 +802,7 @@ services:
         while true; do
           echo "Running extraction at $$(date)"
           python3 /app/delta_export.py --since last
-          echo "Extraction complete. Sleeping for $${SYNC_INTERVAL_SECONDS} seconds..."
+          echo "Extraction complete. Sleeping for $\${SYNC_INTERVAL_SECONDS} seconds..."
           sleep $$SYNC_INTERVAL_SECONDS
         done
     restart: unless-stopped
