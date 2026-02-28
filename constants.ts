@@ -300,6 +300,18 @@ export const i18n = {
       viewPR: "Åpne pull request",
       viewCommit: "Se commit",
       downloadZip: "Last ned som zip i stedet",
+      // Deploy targets
+      targetTitle: "Hvor skal tjenestene kjøre?",
+      targets: {
+        'docker-compose': "Docker Compose",
+        'docker-composeDesc': "Kjør på egen server med Docker. Full kontroll, krever SSH-tilgang.",
+        'fly': "Fly.io",
+        'flyDesc': "Automatisk hosting i Europa. Enkel CLI, HTTPS inkludert, betal-per-bruk.",
+        'railway': "Railway",
+        'railwayDesc': "Koble GitHub-repo og deploy med ett klikk. Null konfigurasjon.",
+        'ghcr': "Container Registry (GHCR)",
+        'ghcrDesc': "Bygg og publiser Docker-images. Driftsorganisasjonen puller og kjører.",
+      },
       // Shared
       kitTitle: "Deploy-konfigurasjon for",
       readyToGenerate: "Klar til å publisere",
@@ -890,6 +902,18 @@ export const i18n = {
       viewPR: "Open pull request",
       viewCommit: "View commit",
       downloadZip: "Download as zip instead",
+      // Deploy targets
+      targetTitle: "Where should the services run?",
+      targets: {
+        'docker-compose': "Docker Compose",
+        'docker-composeDesc': "Run on your own server with Docker. Full control, requires SSH.",
+        'fly': "Fly.io",
+        'flyDesc': "Automatic hosting in Europe. Simple CLI, HTTPS included, pay-per-use.",
+        'railway': "Railway",
+        'railwayDesc': "Connect your GitHub repo and deploy with one click. Zero configuration.",
+        'ghcr': "Container Registry (GHCR)",
+        'ghcrDesc': "Build and publish Docker images. Your ops team pulls and runs them.",
+      },
       // Shared
       kitTitle: "Deploy configuration for",
       readyToGenerate: "Ready to publish",
