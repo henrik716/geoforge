@@ -7,6 +7,7 @@ import {
   Server, Shield, Globe, CloudDownload, Link2, Search, Settings2, FileCode, BookOpen
 } from 'lucide-react';
 import { DataModel } from '../types';
+import { processAnyFile } from '../utils/importUtils';
 
 declare var initSqlJs: any;
 
@@ -82,57 +83,84 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
     setMappings({});
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+ const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setSourceFilename(file.name);
     setSourceUrl('');
     setIsLoading(true);
-    
+
     try {
-      if (file.name.endsWith('.gpkg') || file.name.endsWith('.sqlite')) {
-        const SQL = await initSqlJs({ locateFile: () => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.wasm` });
-        const arrayBuffer = await file.arrayBuffer();
-        const db = new SQL.Database(new Uint8Array(arrayBuffer));
+      // 1. Bruk den kraftige funksjonen for å hente ut struktur (tabeller og kolonner)
+      // Dette gir automatisk støtte for GML, XML, Shapefiles etc.
+      const { model: sourceModel } = await processAnyFile(file);
 
-        const tablesRes = db.exec("SELECT table_name FROM gpkg_contents WHERE data_type = 'features'");
-        const layers: string[] = [];
-        const fieldsMap: Record<string, string[]> = {};
-        const valuesMap: Record<string, Record<string, string[]>> = {};
+      const layers: string[] = [];
+      const fieldsMap: Record<string, string[]> = {};
+      const valuesMap: Record<string, Record<string, string[]>> = {};
 
-        if (tablesRes.length > 0) {
-          const tableRows = tablesRes[0].values;
-          for (const row of tableRows) {
-            const tableName = String(row[0]);
-            layers.push(tableName);
-            const columnsRes = db.exec(`PRAGMA table_info("${tableName}")`);
-            if (columnsRes.length > 0) {
-              const fieldNames = columnsRes[0].values.map((col: any) => String(col[1]));
-              fieldsMap[tableName] = fieldNames;
-              
-              valuesMap[tableName] = {};
-              for (const field of fieldNames) {
-                try {
-                   const distinctRes = db.exec(`SELECT DISTINCT "${field}" FROM "${tableName}" LIMIT 50`);
-                   if (distinctRes.length > 0) {
-                     valuesMap[tableName][field] = distinctRes[0].values.map(v => String(v[0])).filter(v => v !== 'null' && v !== '');
-                   }
-                } catch(e) {}
-              }
+      sourceModel.layers.forEach(layer => {
+        layers.push(layer.name);
+        fieldsMap[layer.name] = layer.properties.map(p => p.name);
+        valuesMap[layer.name] = {};
+      });
+
+      // 2. Forsøk å hente ut unike data-verdier for tryllestav-verktøyet (hvis formatet støttes direkte)
+      try {
+        if (file.name.endsWith('.gpkg') || file.name.endsWith('.sqlite')) {
+          const SQL = await initSqlJs({ locateFile: () => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.wasm` });
+          const arrayBuffer = await file.arrayBuffer();
+          const db = new SQL.Database(new Uint8Array(arrayBuffer));
+
+          for (const layerName of layers) {
+            const fields = fieldsMap[layerName] || [];
+            for (const field of fields) {
+              try {
+                const distinctRes = db.exec(`SELECT DISTINCT "${field}" FROM "${layerName}" LIMIT 50`);
+                if (distinctRes.length > 0) {
+                  valuesMap[layerName][field] = distinctRes[0].values.map(v => String(v[0])).filter(v => v !== 'null' && v !== '');
+                }
+              } catch (e) { /* Ignorer feil på enkeltkolonner */ }
             }
           }
+        } else if (file.name.endsWith('.json') || file.name.endsWith('.geojson')) {
+          const text = await file.text();
+          const json = JSON.parse(text);
+          const features = json.features || (Array.isArray(json) ? json : []);
+          
+          if (features.length > 0 && layers.length > 0) {
+            const layerName = layers[0]; 
+            const fields = fieldsMap[layerName] || [];
+            const valSets: Record<string, Set<string>> = {};
+            fields.forEach(f => valSets[f] = new Set());
+
+            features.slice(0, 100).forEach((f: any) => {
+              const p = f.properties || f;
+              fields.forEach(field => {
+                if (p[field] !== undefined && p[field] !== null) {
+                  valSets[field].add(String(p[field]));
+                }
+              });
+            });
+            
+            Object.keys(valSets).forEach(k => {
+              valuesMap[layerName][k] = Array.from(valSets[k]);
+            });
+          }
         }
-        setSourceLayers(layers);
-        setAllFields(fieldsMap);
-        setUniqueValues(valuesMap);
-        setMappings({});
-      } else {
-        const text = await file.text();
-        const json = JSON.parse(text);
-        processGeoJsonData(json);
+      } catch (valueErr) {
+        console.warn("Kunne ikke hente unike verdier for mapping, men strukturen ble lastet OK.", valueErr);
       }
+
+      // 3. Oppdater state i komponenten
+      setSourceLayers(layers);
+      setAllFields(fieldsMap);
+      setUniqueValues(valuesMap);
+      setMappings({});
+
     } catch (err) {
-      alert(t.importGisError);
+      alert(t.importGisError || "Kunne ikke lese filen");
+      console.error(err);
     } finally {
       setIsLoading(false);
     }

@@ -357,3 +357,52 @@ export const processGpkgFile = async (file: File): Promise<{ model: DataModel; s
 
   return { model, summary };
 };
+
+// ============================================================
+// Unified file processor: tries GDAL first, falls back to sql.js
+// Supports any vector format GDAL can read, not just GeoPackage.
+// ============================================================
+
+export const processAnyFile = async (
+  files: File | File[]
+): Promise<{ model: DataModel; summary: InferredDataSummary }> => {
+  const fileArray = Array.isArray(files) ? files : [files];
+  const mainFile = fileArray[0];
+  const ext = mainFile.name.split('.').pop()?.toLowerCase() || '';
+
+  // Try GDAL first (handles all formats)
+  try {
+    const { processFilesWithGdal } = await import('./gdalService');
+    return await processFilesWithGdal(fileArray);
+  } catch (gdalErr) {
+    console.warn('GDAL processing failed, trying fallbacks:', gdalErr);
+  }
+
+  // Fallback: GeoPackage via sql.js
+  if (ext === 'gpkg') {
+    return processGpkgFile(mainFile);
+  }
+
+  // Fallback: GeoJSON
+  if (ext === 'geojson' || ext === 'json') {
+    const text = await mainFile.text();
+    const json = JSON.parse(text);
+    const model = processGeoJsonToModel(json, mainFile.name);
+    return {
+      model,
+      summary: {
+        filename: mainFile.name,
+        layers: model.layers.map(l => ({
+          tableName: l.name,
+          featureCount: json.features?.length || 0,
+          geometryType: l.geometryType,
+          columnCount: l.properties.length,
+          srid: 4326,
+        })),
+        srid: 4326,
+      }
+    };
+  }
+
+  throw new Error(`Unsupported file format: .${ext}. Supported formats: GeoPackage (.gpkg), Shapefile (.shp), GeoJSON, GML, KML, FlatGeobuf, and more (requires GDAL).`);
+};

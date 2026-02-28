@@ -20,6 +20,7 @@ import {
   processOgcCollectionsToModel,
   processSqlToModel,
   processGpkgFile,
+  processAnyFile,
   InferredDataSummary,
 } from './utils/importUtils';
 
@@ -198,19 +199,15 @@ const App: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     setIsImporting(true);
+    
     try {
       if (file.name.endsWith('.sql')) {
         const text = await file.text();
         handleImportModel(processSqlToModel(text, file.name));
-      } else if (file.name.endsWith('.gpkg') || file.name.endsWith('.sqlite')) {
-        const { model } = await processGpkgFile(file);
-        handleImportModel(model);
       } else {
-        const text = await file.text();
-        const json = JSON.parse(text);
-        if (json.type === 'FeatureCollection' || json.features || Array.isArray(json)) {
-          handleImportModel(processGeoJsonToModel(json, file.name));
-        }
+        // La processAnyFile håndtere GPKG, GeoJSON, GML, XML, KML, Shapefile, etc!
+        const { model } = await processAnyFile(file);
+        handleImportModel(model);
       }
     } catch (err) {
       alert(t.importGisError || "Could not read file");
@@ -225,7 +222,7 @@ const App: React.FC = () => {
   const handleGpkgDrop = async (file: File) => {
     setIsParsingGpkg(true);
     try {
-      const { model, summary } = await processGpkgFile(file);
+      const { model, summary } = await processAnyFile(file);
       // Auto-fill bbox into metadata if available
       if (summary.bbox) {
         model.metadata = {
@@ -280,7 +277,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 overflow-hidden text-slate-900 font-sans selection:bg-indigo-500/20">
-      <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".geojson,.json,.gpkg,.sqlite,.sql" className="hidden" />
+      <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".geojson,.json,.gpkg,.sqlite,.sql, .gml" className="hidden" />
       {showGuide && <Guide onClose={() => { setShowGuide(false); localStorage.setItem('guide_seen', 'true'); }} t={t} />}
       {showGithubImport && <GithubImportDialog t={t} onClose={() => setShowGithubImport(false)} onImport={handleImportModel} />}
       {showUrlImport && <UrlImportDialog t={t} onClose={() => setShowUrlImport(false)} onImport={handleUrlImportSuccess} />}
