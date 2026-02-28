@@ -126,6 +126,7 @@ export interface SharedType {
 export type ViewTab = 'landing' | 'models' | 'editor' | 'preview' | 'mapper' | 'github' | 'deploy' | 'quick-publish';
 
 export type SourceType = 'postgis' | 'supabase' | 'databricks' | 'geopackage';
+export type DeployTarget = 'docker-compose' | 'fly' | 'railway' | 'ghcr';
 
 export interface GeopackageConfig {
   filename: string;

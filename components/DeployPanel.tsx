@@ -6,7 +6,7 @@ import {
   Settings2, FileText, Info, Globe, Github, ExternalLink, Download, GitPullRequest
 } from 'lucide-react';
 import {
-  DataModel, SourceConnection, SourceType,
+  DataModel, SourceConnection, SourceType, DeployTarget,
   PostgresConfig, SupabaseConfig, DatabricksConfig, GeopackageConfig, LayerSourceMapping
 } from '../types';
 import { generateDeployFiles, generatePygeoapiConfig, exportDeployKit } from '../utils/deployUtils';
@@ -127,6 +127,7 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
   const [ghBranch, setGhBranch] = useState(model.githubMeta?.branch || 'main');
   const [ghToken, setGhToken] = useState('');
   const [ghBasePath, setGhBasePath] = useState('');
+  const [deployTarget, setDeployTarget] = useState<DeployTarget>('docker-compose');
   const [repoAccess, setRepoAccess] = useState<{ isOwner: boolean; ownerLogin: string; userLogin: string } | null>(null);
   const [repoCheckStatus, setRepoCheckStatus] = useState<'idle' | 'checking' | 'done' | 'error'>('idle');
   const [publishStatus, setPublishStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -205,7 +206,7 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
     setPublishStatus('loading');
     setPublishResult(null);
     try {
-      const files = generateDeployFiles(model, source, lang);
+      const files = generateDeployFiles(model, source, lang, deployTarget);
       const commitMsg = `[${model.version}] Deploy ${model.name}`;
       const result = await pushDeployKit(
         ghToken, ghRepo, ghBranch, ghBasePath, files, commitMsg,
@@ -223,7 +224,7 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
   const handleDownloadZip = async () => {
     const source = buildSource();
     if (!source) return;
-    await exportDeployKit(model, source, lang);
+    await exportDeployKit(model, source, lang, deployTarget);
   };
 
   const stepIcons = [Database, Link2, Table, Github];
@@ -506,6 +507,43 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
                 <p className="text-white font-bold text-lg truncate capitalize">{String(stat.val)}</p>
               </div>
             ))}
+          </div>
+
+          {/* Deploy target selector */}
+          <div className="p-8 md:p-12 border-b border-slate-800 space-y-4">
+            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">{d.targetTitle}</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {(['railway', 'fly', 'ghcr', 'docker-compose'] as DeployTarget[]).map(tgt => {
+                const icons: Record<string, React.ReactNode> = {
+                  'railway': <Cloud size={18} />,
+                  'fly': <Cloud size={18} />,
+                  'ghcr': <Package size={18} />,
+                  'docker-compose': <Server size={18} />,
+                };
+                const isActive = deployTarget === tgt;
+                return (
+                  <button
+                    key={tgt}
+                    onClick={() => setDeployTarget(tgt)}
+                    className={`flex items-center gap-3 p-4 rounded-2xl border text-left transition-all ${
+                      isActive
+                        ? 'bg-violet-600/20 border-violet-500 shadow-lg shadow-violet-500/10'
+                        : 'bg-slate-800/60 border-slate-700 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                      isActive ? 'bg-violet-600 text-white' : 'bg-slate-700 text-slate-400'
+                    }`}>
+                      {icons[tgt]}
+                    </div>
+                    <div className="min-w-0">
+                      <p className={`text-xs font-black truncate ${isActive ? 'text-white' : 'text-slate-300'}`}>{d.targets?.[tgt]}</p>
+                      <p className="text-[9px] text-slate-500 font-medium mt-0.5 line-clamp-2 leading-relaxed">{d.targets?.[tgt + 'Desc']}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* GitHub config */}
