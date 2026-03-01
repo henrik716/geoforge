@@ -160,6 +160,13 @@ export const generatePygeoapiConfig = (
       yaml += `        table: ${sourceTable}\n`;
       yaml += `        id_field: ${mapping?.primaryKeyColumn || 'fid'}\n`;
       yaml += `        geom_field: ${layer.geometryColumnName || 'geom'}\n\n`;
+      console.log('GeoPackage provider config:', {
+        layerName: layer.name,
+        sourceTable,
+        primaryKeyColumn: mapping?.primaryKeyColumn || 'fid',
+        geometryColumn: layer.geometryColumnName || 'geom',
+        mapping
+      });
     }
   });
 

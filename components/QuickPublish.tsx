@@ -115,6 +115,14 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
           const summaryLayer = summary.layers.find(sl => sl.tableName === l.name);
           const primaryKeyColumn = summaryLayer?.primaryKeyColumn || 'fid';
           
+          console.log('Layer mapping debug:', {
+            layerName: l.name,
+            layerId: l.id,
+            summaryLayer,
+            primaryKeyColumn,
+            sourceTable: l.name
+          });
+          
           return [l.id, {
             sourceTable: l.name, // Use actual table name from GeoPackage import
             fieldMappings: {},
