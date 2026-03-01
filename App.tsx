@@ -231,6 +231,8 @@ const App: React.FC = () => {
   // Quick publish: drop a GeoPackage → infer → quick-publish flow
   const handleGpkgDrop = async (file: File) => {
     setIsParsingGpkg(true);
+    // Clear any existing validation state to prevent stale data
+    setQuickPublishValidation(null);
     try {
       const { model, summary, validation } = await processAnyFile(file);
       // Auto-fill bbox into metadata if available

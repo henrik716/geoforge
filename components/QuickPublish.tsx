@@ -251,7 +251,7 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
           {/* Validation warnings */}
           {validation && (
             <ImportWarnings
-              key={`validation-${validation.warnings.length}-${validation.errors.length}`}
+              key={`validation-${Date.now()}-${validation.warnings.length}-${validation.errors.length}-${validation.warnings.map(w => `${w.layerName}:${w.type}:${w.message}`).sort().join('|')}-${validation.errors.map(e => `${e.layerName}:${e.type}:${e.message}`).sort().join('|')}`}
               validation={validation}
               t={t}
               lang={lang}
