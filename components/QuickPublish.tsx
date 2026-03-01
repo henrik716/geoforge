@@ -108,16 +108,25 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
         ...model,
         layers: model.layers.filter(l => selectedLayers.has(l.id)),
       };
+      
+      // Find the actual primary key column for each layer
+      const layerMappings = Object.fromEntries(
+        publishModel.layers.map(l => {
+          const summaryLayer = summary.layers.find(sl => sl.tableName === l.name);
+          const primaryKeyColumn = summaryLayer?.primaryKeyColumn || 'fid';
+          
+          return [l.id, {
+            sourceTable: l.name, // Use actual table name from GeoPackage import
+            fieldMappings: {},
+            primaryKeyColumn,
+          }];
+        })
+      );
+      
       const source = {
         type: 'geopackage' as const,
         config: { filename: summary.filename },
-        layerMappings: Object.fromEntries(
-          publishModel.layers.map(l => [l.id, {
-            sourceTable: l.name.toLowerCase().replace(/\s+/g, '_'),
-            fieldMappings: {},
-            primaryKeyColumn: 'fid',
-          }])
-        ),
+        layerMappings,
       };
       const files = generateDeployFiles(publishModel, source, lang, deployTarget);
       const commitMsg = `[${publishModel.version}] Publish ${publishModel.name}`;
@@ -140,16 +149,25 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
 
   const handleDownloadZip = async () => {
     const publishModel = { ...model, layers: model.layers.filter(l => selectedLayers.has(l.id)) };
+    
+    // Find the actual primary key column for each layer
+    const layerMappings = Object.fromEntries(
+      publishModel.layers.map(l => {
+        const summaryLayer = summary.layers.find(sl => sl.tableName === l.name);
+        const primaryKeyColumn = summaryLayer?.primaryKeyColumn || 'fid';
+        
+        return [l.id, {
+          sourceTable: l.name, // Use actual table name from GeoPackage import
+          fieldMappings: {},
+          primaryKeyColumn,
+        }];
+      })
+    );
+    
     const source = {
       type: 'geopackage' as const,
       config: { filename: summary.filename },
-      layerMappings: Object.fromEntries(
-        publishModel.layers.map(l => [l.id, {
-          sourceTable: l.name.toLowerCase().replace(/\s+/g, '_'),
-          fieldMappings: {},
-          primaryKeyColumn: 'fid',
-        }])
-      ),
+      layerMappings,
     };
     const binaryFilesForZip = includeData && dataBlob ? { [`data/${dataBlob.filename}`]: dataBlob.blob } : undefined;
     await exportDeployKit(publishModel, source, lang, deployTarget, binaryFilesForZip);
@@ -356,6 +374,30 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
             <div className="space-y-1.5">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.contactOrganization}</label>
               <input value={meta.contactOrganization} onChange={e => updateMeta({ contactOrganization: e.target.value })} placeholder={md.contactOrganizationPlaceholder} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" />
+            </div>
+          </div>
+
+          {/* Dataset URLs */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.datasetUrl}</label>
+              <input 
+                type="url" 
+                value={meta.url || ''} 
+                onChange={e => updateMeta({ url: e.target.value })} 
+                placeholder={md.datasetUrlPlaceholder}
+                className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" 
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.termsOfService}</label>
+              <input 
+                type="url" 
+                value={meta.termsOfService || ''} 
+                onChange={e => updateMeta({ termsOfService: e.target.value })} 
+                placeholder={md.termsOfServicePlaceholder}
+                className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" 
+              />
             </div>
           </div>
 

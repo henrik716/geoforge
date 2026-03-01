@@ -240,6 +240,7 @@ export interface InferredLayerSummary {
   geometryType: GeometryType;
   columnCount: number;
   srid: number;
+  primaryKeyColumn: string;
 }
 
 export interface InferredDataSummary {
@@ -303,6 +304,19 @@ export const processGpkgFile = async (file: File): Promise<{ model: DataModel; s
         if (countRes.length > 0) featureCount = Number(countRes[0].values[0][0]);
       } catch { /* count is optional */ }
 
+      // Find primary key column
+      let primaryKeyColumn = 'fid';
+      if (columnsRes.length > 0) {
+        for (const col of columnsRes[0].values) {
+          const name = col[1];
+          const isPk = col[5] === 1;
+          if (isPk) {
+            primaryKeyColumn = name;
+            break;
+          }
+        }
+      }
+
       if (columnsRes.length > 0) {
         columnsRes[0].values.forEach((col: any) => {
           const name = col[1];
@@ -335,6 +349,7 @@ export const processGpkgFile = async (file: File): Promise<{ model: DataModel; s
         geometryType,
         columnCount: properties.length,
         srid,
+        primaryKeyColumn,
       });
     }
   }

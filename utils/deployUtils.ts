@@ -83,17 +83,32 @@ export const generatePygeoapiConfig = (
     'CC-BY-SA-4.0': 'https://creativecommons.org/licenses/by-sa/4.0/',
     'NLOD-2.0': 'https://data.norge.no/nlod/no/2.0',
   };
-  yaml += `metadata:\n  identification:\n    title: ${model.name}\n    description: ${model.description || 'Spatial data'}\n    keywords:\n`;
+  
+  yaml += `metadata:\n`;
+  yaml += `  identification:\n`;
+  yaml += `    title: ${model.name}\n`;
+  yaml += `    description: ${model.description || 'Spatial data'}\n`;
+  yaml += `    url: ${meta.url || 'https://example.com/dataset'}\n`;
+  yaml += `    terms_of_service: ${meta.termsOfService || 'https://example.com/terms'}\n`;
+  yaml += `    keywords:\n`;
   keywords.forEach(kw => { yaml += `      - ${kw}\n`; });
+  
   if (meta?.purpose) {
     yaml += `    abstract: ${meta.purpose}\n`;
   }
-  yaml += `  license:\n    name: ${licenseName}\n    url: ${licenseUrls[licenseName] || ''}\n`;
+  
+  yaml += `  license:\n`;
+  yaml += `    name: ${licenseName}\n`;
+  yaml += `    url: ${licenseUrls[licenseName] || ''}\n`;
+  
   if (meta?.contactName || meta?.contactEmail || meta?.contactOrganization) {
     yaml += `  contact:\n`;
-    if (meta?.contactName) yaml += `    name: ${meta.contactName}\n`;
+    yaml += `    name: ${meta.contactName || 'Contact'}\n`;
+    yaml += `    email: ${meta.contactEmail || 'contact@example.com'}\n`;
+    yaml += `  provider:\n`;
+    yaml += `    name: ${meta.contactName || 'Contact'}\n`;
     if (meta?.contactOrganization) yaml += `    organization: ${meta.contactOrganization}\n`;
-    if (meta?.contactEmail) yaml += `    email: ${meta.contactEmail}\n`;
+    yaml += `    email: ${meta.contactEmail || 'contact@example.com'}\n`;
   }
   yaml += `\n`;
   yaml += `resources:\n`;
@@ -143,7 +158,8 @@ export const generatePygeoapiConfig = (
       yaml += `        name: SQLiteGPKG\n`;
       yaml += `        data: /data/${gpkgFilename}\n`;
       yaml += `        table: ${sourceTable}\n`;
-      yaml += `        id_field: ${mapping?.primaryKeyColumn || 'fid'}\n\n`;
+      yaml += `        id_field: ${mapping?.primaryKeyColumn || 'fid'}\n`;
+      yaml += `        geom_field: ${layer.geometryColumnName || 'geom'}\n\n`;
     }
   });
 
