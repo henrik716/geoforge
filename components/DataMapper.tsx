@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
-  Upload, Table, Copy, Check, 
+  Upload, Table, Copy, Check, Download, Play,
   Terminal, RefreshCw, Database, 
   X, Info, ExternalLink, HelpCircle, ArrowRightLeft, 
   Layers, CheckCircle2, ListChecks, ArrowDown, Lock, ChevronDown, ChevronRight, Wand2,
-  Server, Shield, Globe, CloudDownload, Link2, Search, Settings2, FileCode, BookOpen
+  Server, Shield, Globe, CloudDownload, Link2, Search, Settings2, FileCode, BookOpen,
+  ArrowRight, AlertTriangle
 } from 'lucide-react';
 import { DataModel } from '../types';
 import { processAnyFile } from '../utils/importUtils';
@@ -20,21 +21,30 @@ interface LayerMapping {
 interface DataMapperProps {
   model: DataModel;
   t: any;
+  onTransformedData?: (blob: Blob, filename: string) => void;
 }
 
-const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
+const DataMapper: React.FC<DataMapperProps> = ({ model, t, onTransformedData }) => {
   const [sourceLayers, setSourceLayers] = useState<string[]>([]);
   const [allFields, setAllFields] = useState<Record<string, string[]>>({}); // layerName -> fieldNames
+  const [sourceGeomColumns, setSourceGeomColumns] = useState<Record<string, string>>({}); // layerName -> geometry column name
   const [uniqueValues, setUniqueValues] = useState<Record<string, Record<string, string[]>>>({}); // layerName -> fieldName -> uniqueValues
   const [mappings, setMappings] = useState<Record<string, LayerMapping>>({}); // modelLayerId -> mapping
   const [activeModelLayerId, setActiveModelLayerId] = useState<string>(model.layers[0]?.id || '');
   const [sourceFilename, setSourceFilename] = useState<string>('');
   const [sourceUrl, setSourceUrl] = useState<string>('');
+  const [sourceFiles, setSourceFiles] = useState<File[]>([]);
   const [copied, setCopied] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [openValueMapId, setOpenValueMapId] = useState<string | null>(null);
   const [showUrlInput, setShowUrlInput] = useState(false);
+  const [showScript, setShowScript] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Transform state
+  const [transformStatus, setTransformStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [transformedBlob, setTransformedBlob] = useState<Blob | null>(null);
+  const [transformError, setTransformError] = useState<string>('');
 
   // PostGIS Specific State
   const [targetType, setTargetType] = useState<'gpkg' | 'postgis'>('gpkg');
@@ -79,6 +89,7 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
     }
     setSourceLayers(['default']);
     setAllFields({ 'default': fields });
+    setSourceGeomColumns({ 'default': 'geometry' });
     setUniqueValues({ 'default': Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Array.from(v)])) });
     setMappings({});
   };
@@ -86,8 +97,13 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const allFiles = Array.from(e.target.files || []);
     setSourceFilename(file.name);
     setSourceUrl('');
+    setSourceFiles(allFiles);
+    setTransformedBlob(null);
+    setTransformStatus('idle');
+    setTransformError('');
     setIsLoading(true);
 
     try {
@@ -98,11 +114,13 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
       const layers: string[] = [];
       const fieldsMap: Record<string, string[]> = {};
       const valuesMap: Record<string, Record<string, string[]>> = {};
+      const geomColMap: Record<string, string> = {};
 
       sourceModel.layers.forEach(layer => {
         layers.push(layer.name);
         fieldsMap[layer.name] = layer.properties.map(p => p.name);
         valuesMap[layer.name] = {};
+        geomColMap[layer.name] = layer.geometryColumnName || 'geometry';
       });
 
       // 2. Forsøk å hente ut unike data-verdier for tryllestav-verktøyet (hvis formatet støttes direkte)
@@ -155,6 +173,7 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
       // 3. Oppdater state i komponenten
       setSourceLayers(layers);
       setAllFields(fieldsMap);
+      setSourceGeomColumns(geomColMap);
       setUniqueValues(valuesMap);
       setMappings({});
 
@@ -282,7 +301,8 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
         });
       
       const geomCol = modelLayer.geometryColumnName || 'geometri';
-      const sql = `SELECT ${selectFields.length > 0 ? selectFields.join(', ') + ', ' : ''}geometry FROM "${mapping.sourceLayer}"`;
+      const sourceGeomCol = sourceGeomColumns[mapping.sourceLayer] || 'geometry';
+      const sql = `SELECT ${selectFields.length > 0 ? selectFields.join(', ') + ', ' : ''}"${sourceGeomCol}" FROM "${mapping.sourceLayer}"`;
       
       lines.push(`ogr2ogr ${formatFlag} ${targetOutput} ${sourceString} \\
   -nln "${targetLayerName}" \\
@@ -293,6 +313,105 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
     });
 
     return lines.join('\n\n');
+  };
+
+  // ============================================================
+  // Browser-side transform via gdal3.js WASM
+  // ============================================================
+  const handleTransform = async () => {
+    if (sourceFiles.length === 0 || mappedLayerCount === 0) return;
+    setTransformStatus('running');
+    setTransformError('');
+    setTransformedBlob(null);
+
+    try {
+      const { getGdal } = await import('../utils/gdalService');
+      const Gdal = await getGdal();
+
+      // Open source files
+      const openResult = await Gdal.open(sourceFiles);
+      if (!openResult.datasets || openResult.datasets.length === 0) {
+        throw new Error('Kunne ikke åpne kildefilen');
+      }
+      const dataset = openResult.datasets[0];
+
+      // Build ogr2ogr calls from mappings (same SQL logic as generateOgrCommand)
+      let finalBlob: Blob | null = null;
+
+      for (const [layerId, m] of Object.entries(mappings)) {
+        const mapping = m as LayerMapping;
+        if (!mapping.sourceLayer) continue;
+        const modelLayer = model.layers.find(l => l.id === layerId);
+        if (!modelLayer) continue;
+
+        const targetLayerName = modelLayer.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const selectFields = modelLayer.properties
+          .filter(p => mapping.fieldMappings[p.id])
+          .map(p => {
+            const sourceF = mapping.fieldMappings[p.id];
+            const vMap = mapping.valueMappings[p.id];
+            if (vMap && Object.keys(vMap).length > 0) {
+              let caseSql = `CASE `;
+              Object.entries(vMap).forEach(([src, trg]) => {
+                caseSql += `WHEN "${sourceF}" = '${src}' THEN ${trg ? `'${trg}'` : 'NULL'} `;
+              });
+              caseSql += `ELSE "${sourceF}" END`;
+              return `${caseSql} AS "${p.name}"`;
+            }
+            return `"${sourceF}" AS "${p.name}"`;
+          });
+
+        const geomCol = modelLayer.geometryColumnName || 'geometri';
+        const sourceGeomCol = sourceGeomColumns[mapping.sourceLayer] || 'geometry';
+        const sql = `SELECT ${selectFields.length > 0 ? selectFields.join(', ') + ', ' : ''}"${sourceGeomCol}" FROM "${mapping.sourceLayer}"`;
+        const opts: string[] = [
+          '-f', 'GPKG',
+          '-nln', targetLayerName,
+          '-nlt', modelLayer.geometryType.toUpperCase(),
+          '-sql', sql,
+          '-lco', `GEOMETRY_NAME=${geomCol}`,
+        ];
+        if (finalBlob) opts.push('-update', '-append');
+
+        const output = await Gdal.ogr2ogr(dataset, opts);
+        const bytes = await Gdal.getFileBytes(output);
+        finalBlob = new Blob([bytes], { type: 'application/geopackage+sqlite3' });
+      }
+
+      Gdal.close(dataset);
+
+      if (finalBlob) {
+        setTransformedBlob(finalBlob);
+        setTransformStatus('done');
+      } else {
+        throw new Error('Ingen lag ble transformert');
+      }
+    } catch (err: any) {
+      console.error('Transform failed:', err);
+      setTransformError(err.message || 'Transformasjon feilet');
+      setTransformStatus('error');
+    }
+  };
+
+  const handleDownloadGpkg = () => {
+    if (!transformedBlob) return;
+    const url = URL.createObjectURL(transformedBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${model.name.replace(/\s/g, '_')}.gpkg`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSendToPublish = () => {
+    if (!transformedBlob || !onTransformedData) return;
+    onTransformedData(transformedBlob, `${model.name.replace(/\s/g, '_')}.gpkg`);
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const copyToClipboard = () => {
@@ -325,7 +444,7 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
           { id: 1, label: t.mapper.step1.split('. ')[1] || 'Source', icon: Upload },
           { id: 2, label: t.mapper.step2.split('. ')[1] || 'Target', icon: Table },
           { id: 3, label: t.mapper.step3.split('. ')[1] || 'Map', icon: ArrowRightLeft },
-          { id: 4, label: t.mapper.step4.split('. ')[1] || 'Script', icon: FileCode },
+          { id: 4, label: t.mapper?.step4?.split('. ')[1] || 'Transform', icon: Play },
         ].map((step, idx, arr) => (
           <React.Fragment key={step.id}>
             <div className="flex flex-col items-center gap-2 relative z-10">
@@ -394,10 +513,10 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
               <div className="flex items-center gap-3 bg-emerald-50 text-emerald-700 px-6 py-3 rounded-2xl border border-emerald-100 w-fit animate-in zoom-in-95">
                  <CheckCircle2 size={16} />
                  <span className="text-[10px] font-black uppercase tracking-widest truncate max-w-[200px] sm:max-w-[300px]">{sourceFilename}</span>
-                 <button onClick={() => { setSourceFilename(''); setSourceUrl(''); setMappings({}); }} className="ml-2 hover:text-rose-600 transition-colors"><X size={16}/></button>
+                 <button onClick={() => { setSourceFilename(''); setSourceUrl(''); setSourceFiles([]); setSourceGeomColumns({}); setMappings({}); setTransformedBlob(null); setTransformStatus('idle'); }} className="ml-2 hover:text-rose-600 transition-colors"><X size={16}/></button>
               </div>
            )}
-           <input type="file" ref={fileInputRef} className="hidden" accept=".geojson,.json,.gpkg,.sqlite,.gml,.xml" onChange={handleFileUpload} />
+           <input type="file" ref={fileInputRef} className="hidden" accept=".geojson,.json,.gpkg,.sqlite,.gml,.xml,.kml,.kmz,.shp,.shx,.dbf,.prj,.cpg,.fgb,.tab,.mif,.csv,.gpx,.dxf" multiple onChange={handleFileUpload} />
       </section>
 
       {/* STEP 2: LAYER MATCHING */}
@@ -598,88 +717,164 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
         </div>
       )}
 
-      {/* STEP 4: EXPORT OPTIONS & SCRIPT */}
+      {/* STEP 4: TRANSFORM & EXPORT */}
       <section className={`transition-all duration-500 ${mappedLayerCount === 0 ? 'opacity-30 grayscale pointer-events-none' : 'opacity-100'}`}>
          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 bg-slate-900 rounded-[40px] shadow-2xl overflow-hidden border border-slate-800 flex flex-col relative">
-               {!mappedLayerCount && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"><div className="bg-white/10 backdrop-blur-xl p-8 rounded-3xl border border-white/10 text-center"><Lock size={40} className="text-white/40 mx-auto mb-4" /><p className="text-white text-xs font-black uppercase tracking-widest">{t.mapper.mapOneHint}</p></div></div>}
+            <div className="lg:col-span-2 space-y-6">
                
-               <div className="p-8 bg-slate-800/80 border-b border-slate-700">
-                  <div className="flex flex-col sm:flex-row gap-4 mb-8">
-                     <button 
-                       onClick={() => setTargetType('gpkg')} 
-                       className={`flex-1 flex items-center justify-center gap-3 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${targetType === 'gpkg' ? 'bg-indigo-600 text-white shadow-xl' : 'bg-slate-900 text-slate-500 hover:text-slate-300'}`}
-                     >
-                       <Database size={18}/> GeoPackage
-                     </button>
-                     <button 
-                       onClick={() => setTargetType('postgis')} 
-                       className={`flex-1 flex items-center justify-center gap-3 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${targetType === 'postgis' ? 'bg-blue-600 text-white shadow-xl' : 'bg-slate-900 text-slate-500 hover:text-slate-300'}`}
-                     >
-                       <Server size={18}/> PostGIS / Cloud SQL
-                     </button>
+               {/* Primary: Transform in browser */}
+               <div className="bg-white rounded-[40px] shadow-sm overflow-hidden border border-slate-200">
+                  <div className="p-8 md:p-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+                     <div className="flex items-center gap-6">
+                        <div className={`w-16 h-16 rounded-[24px] flex items-center justify-center shadow-2xl transition-all shrink-0 ${transformStatus === 'done' ? 'bg-emerald-500 text-white shadow-emerald-200' : transformStatus === 'error' ? 'bg-rose-500 text-white shadow-rose-200' : 'bg-indigo-600 text-white shadow-indigo-200'}`}>
+                           {transformStatus === 'done' ? <Check size={32} /> : transformStatus === 'running' ? <RefreshCw size={32} className="animate-spin" /> : <Play size={28} />}
+                        </div>
+                        <div>
+                           <h3 className="text-lg md:text-xl font-black text-slate-800 tracking-tight leading-none mb-1">{t.mapper?.step4 || '4. Transformer'}</h3>
+                           <p className="text-xs text-slate-500 font-medium">
+                              {transformStatus === 'done' 
+                                ? `GeoPackage klar — ${formatFileSize(transformedBlob?.size || 0)}`
+                                : transformStatus === 'running' ? 'Transformerer med GDAL...'
+                                : transformStatus === 'error' ? transformError
+                                : sourceFiles.length > 0 ? 'Kjør ogr2ogr i nettleseren via WebAssembly' : 'Last opp en kildefil først'
+                              }
+                           </p>
+                        </div>
+                     </div>
+                     
+                     {transformStatus !== 'done' && (
+                       <button 
+                         onClick={handleTransform}
+                         disabled={transformStatus === 'running' || sourceFiles.length === 0 || mappedLayerCount === 0}
+                         className="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.15em] flex items-center justify-center gap-3 shadow-2xl shadow-indigo-200 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
+                       >
+                         {transformStatus === 'running' ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
+                         {transformStatus === 'running' ? 'Transformerer...' : 'Transformer'}
+                       </button>
+                     )}
                   </div>
 
-                  {targetType === 'postgis' && (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 animate-in slide-in-from-top-4">
-                       {[
-                         { label: 'Host', key: 'host' },
-                         { label: 'Port', key: 'port' },
-                         { label: 'Database', key: 'dbname' },
-                         { label: 'User', key: 'user' },
-                         { label: 'Password', key: 'password', type: 'password' },
-                         { label: 'Schema', key: 'schema' }
-                       ].map(f => (
-                         <div key={f.key} className="space-y-1.5">
-                            <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{f.label}</label>
-                            <input 
-                              type={f.type || "text"} 
-                              value={(pgConfig as any)[f.key]} 
-                              onChange={e => setPgConfig({...pgConfig, [f.key]: e.target.value})} 
-                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-[11px] text-white outline-none focus:border-blue-500" 
-                            />
-                         </div>
-                       ))}
+                  {/* Transform result actions */}
+                  {transformStatus === 'done' && transformedBlob && (
+                    <div className="px-8 md:px-10 pb-8 md:pb-10 flex flex-col sm:flex-row gap-4">
+                       <button 
+                         onClick={handleDownloadGpkg}
+                         className="flex-1 flex items-center justify-center gap-3 px-6 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.15em] shadow-xl shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition-all"
+                       >
+                         <Download size={18} /> Last ned GeoPackage
+                       </button>
+                       {onTransformedData && (
+                         <button 
+                           onClick={handleSendToPublish}
+                           className="flex-1 flex items-center justify-center gap-3 px-6 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.15em] shadow-xl shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all"
+                         >
+                           <ArrowRight size={18} /> Send til QuickPublish
+                         </button>
+                       )}
+                       <button 
+                         onClick={() => { setTransformStatus('idle'); setTransformedBlob(null); }}
+                         className="px-6 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-[0.15em] hover:bg-slate-200 active:scale-95 transition-all"
+                       >
+                         <RefreshCw size={18} />
+                       </button>
+                    </div>
+                  )}
+
+                  {/* Transform error retry */}
+                  {transformStatus === 'error' && (
+                    <div className="px-8 md:px-10 pb-8 md:pb-10">
+                       <div className="flex items-center gap-3 bg-rose-50 text-rose-700 px-6 py-3 rounded-2xl border border-rose-100 text-xs font-bold">
+                         <AlertTriangle size={16} /> {transformError || 'Transformasjon feilet'}
+                       </div>
                     </div>
                   )}
                </div>
 
-               <div className="px-8 py-10 bg-slate-800 border-b border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-6">
-                  <div className="flex items-center gap-6">
-                     <div className={`w-16 h-16 rounded-[24px] flex items-center justify-center text-white shadow-2xl transition-all shrink-0 ${targetType === 'gpkg' ? 'bg-amber-500 shadow-amber-900/40' : 'bg-blue-500 shadow-blue-900/40'}`}>
-                       <FileCode size={32} />
-                     </div>
-                     <div>
-                        <h3 className="text-xl font-black text-white tracking-tight leading-none mb-1">{t.mapper.step4}</h3>
-                        <p className="text-xs text-slate-400 font-medium">{t.mapper.generateScript}</p>
-                     </div>
-                  </div>
+               {/* Secondary: ogr2ogr script (collapsible) */}
+               <div className="bg-slate-900 rounded-[40px] shadow-2xl overflow-hidden border border-slate-800">
                   <button 
-                     onClick={copyToClipboard}
-                     className={`w-full sm:w-auto px-8 py-4 rounded-2xl transition-all font-black text-[10px] uppercase tracking-[0.15em] flex items-center justify-center gap-3 shadow-2xl active:scale-95 ${copied ? 'bg-emerald-600 text-white shadow-emerald-900/40' : 'bg-slate-700 text-slate-300 hover:text-white'}`}
+                    onClick={() => setShowScript(!showScript)}
+                    className="w-full px-8 py-6 flex items-center justify-between text-left hover:bg-slate-800/60 transition-colors"
                   >
-                     {copied ? <Check size={18} /> : <Copy size={18} />}
-                     {copied ? t.copied : t.mapper.copyScript}
-                  </button>
-               </div>
-               
-               <div className="p-8 md:p-10 font-mono text-[10px] md:text-xs text-indigo-100 leading-relaxed whitespace-pre-wrap break-all bg-black/40 overflow-y-auto max-h-[400px] custom-scrollbar select-all selection:bg-rose-500/30">
-                  {mappedLayerCount > 0 ? generateOgrCommand() : <p className="opacity-20 italic text-center py-20 uppercase font-black tracking-widest">{t.mapper.mapOneHint}</p>}
-               </div>
-               
-               <div className="p-8 bg-slate-800/40 border-t border-slate-700 grid grid-cols-1 sm:grid-cols-2 gap-8">
-                  <div className="space-y-4">
-                     <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-500">{t.mapper.explanation.title}</h5>
-                     <div className="space-y-1.5">
-                        <p className="text-[9px] font-bold text-slate-500 uppercase"><span className="text-rose-400">-f:</span> {t.mapper.explanation.f}</p>
-                        <p className="text-[9px] font-bold text-slate-500 uppercase"><span className="text-rose-400">-nln:</span> {t.mapper.explanation.nln}</p>
-                        <p className="text-[9px] font-bold text-slate-500 uppercase"><span className="text-rose-400">-sql:</span> {t.mapper.explanation.sql}</p>
+                     <div className="flex items-center gap-4">
+                        <Terminal size={20} className="text-slate-500" />
+                        <div>
+                           <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{t.mapper?.copyScript || 'ogr2ogr-kommando'}</span>
+                           <p className="text-[10px] text-slate-600 font-medium mt-0.5">For bruk i terminal eller CI/CD-pipeline</p>
+                        </div>
                      </div>
-                  </div>
-                  <div className="space-y-4">
-                     <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-500">{t.mapper.howToRun}</h5>
-                     <p className="text-[9px] font-bold text-slate-500 leading-relaxed uppercase">{t.mapper.howToRunDesc}</p>
-                  </div>
+                     <ChevronDown size={18} className={`text-slate-500 transition-transform ${showScript ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {showScript && (
+                    <>
+                      <div className="px-8 py-4 border-t border-slate-800 bg-slate-800/80 flex flex-col sm:flex-row gap-4">
+                         <div className="flex flex-col sm:flex-row gap-4 flex-1">
+                            <button 
+                              onClick={() => setTargetType('gpkg')} 
+                              className={`flex-1 flex items-center justify-center gap-3 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${targetType === 'gpkg' ? 'bg-indigo-600 text-white shadow-xl' : 'bg-slate-900 text-slate-500 hover:text-slate-300'}`}
+                            >
+                              <Database size={16}/> GeoPackage
+                            </button>
+                            <button 
+                              onClick={() => setTargetType('postgis')} 
+                              className={`flex-1 flex items-center justify-center gap-3 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${targetType === 'postgis' ? 'bg-blue-600 text-white shadow-xl' : 'bg-slate-900 text-slate-500 hover:text-slate-300'}`}
+                            >
+                              <Server size={16}/> PostGIS
+                            </button>
+                         </div>
+                         <button 
+                           onClick={copyToClipboard}
+                           className={`px-6 py-3 rounded-2xl transition-all font-black text-[10px] uppercase tracking-[0.15em] flex items-center justify-center gap-3 active:scale-95 ${copied ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300 hover:text-white'}`}
+                         >
+                           {copied ? <Check size={16} /> : <Copy size={16} />}
+                           {copied ? t.copied : t.mapper?.copyScript || 'Kopier'}
+                         </button>
+                      </div>
+
+                      {targetType === 'postgis' && (
+                        <div className="px-8 py-4 bg-slate-800/60 border-t border-slate-800 grid grid-cols-2 sm:grid-cols-3 gap-4">
+                           {[
+                             { label: 'Host', key: 'host' },
+                             { label: 'Port', key: 'port' },
+                             { label: 'Database', key: 'dbname' },
+                             { label: 'User', key: 'user' },
+                             { label: 'Password', key: 'password', type: 'password' },
+                             { label: 'Schema', key: 'schema' }
+                           ].map(f => (
+                             <div key={f.key} className="space-y-1.5">
+                                <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{f.label}</label>
+                                <input 
+                                  type={f.type || "text"} 
+                                  value={(pgConfig as any)[f.key]} 
+                                  onChange={e => setPgConfig({...pgConfig, [f.key]: e.target.value})} 
+                                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-[11px] text-white outline-none focus:border-blue-500" 
+                                />
+                             </div>
+                           ))}
+                        </div>
+                      )}
+
+                      <div className="p-8 md:p-10 font-mono text-[10px] md:text-xs text-indigo-100 leading-relaxed whitespace-pre-wrap break-all bg-black/40 overflow-y-auto max-h-[400px] custom-scrollbar select-all selection:bg-rose-500/30 border-t border-slate-800">
+                         {mappedLayerCount > 0 ? generateOgrCommand() : <p className="opacity-20 italic text-center py-20 uppercase font-black tracking-widest">{t.mapper?.mapOneHint || 'Map minst ett lag først'}</p>}
+                      </div>
+                      
+                      <div className="p-8 bg-slate-800/40 border-t border-slate-700 grid grid-cols-1 sm:grid-cols-2 gap-8">
+                         <div className="space-y-4">
+                            <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-500">{t.mapper?.explanation?.title || 'Forklaring'}</h5>
+                            <div className="space-y-1.5">
+                               <p className="text-[9px] font-bold text-slate-500 uppercase"><span className="text-rose-400">-f:</span> {t.mapper?.explanation?.f || 'Output-format'}</p>
+                               <p className="text-[9px] font-bold text-slate-500 uppercase"><span className="text-rose-400">-nln:</span> {t.mapper?.explanation?.nln || 'Nytt lagnavn'}</p>
+                               <p className="text-[9px] font-bold text-slate-500 uppercase"><span className="text-rose-400">-sql:</span> {t.mapper?.explanation?.sql || 'SQL-spørring for feltmapping'}</p>
+                            </div>
+                         </div>
+                         <div className="space-y-4">
+                            <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-500">{t.mapper?.howToRun || 'Slik kjører du'}</h5>
+                            <p className="text-[9px] font-bold text-slate-500 leading-relaxed uppercase">{t.mapper?.howToRunDesc || 'Installer GDAL og kjør kommandoen i terminalen.'}</p>
+                         </div>
+                      </div>
+                    </>
+                  )}
                </div>
             </div>
 
@@ -693,20 +888,20 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t }) => {
                   <div className="space-y-2">
                      <div className="flex items-center gap-2 text-indigo-700">
                         <Shield size={16} />
-                        <h5 className="text-[10px] font-black uppercase tracking-widest">{targetType === 'postgis' ? t.mapper.dbMigration : t.mapper.simpleFileMig}</h5>
+                        <h5 className="text-[10px] font-black uppercase tracking-widest">{targetType === 'postgis' ? (t.mapper?.dbMigration || 'Database-migrering') : (t.mapper?.simpleFileMig || 'Filkonvertering')}</h5>
                      </div>
                      <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                        {targetType === 'postgis' ? t.mapper.postgisAdvantage : t.mapper.gpkgAdvantage}
+                        {targetType === 'postgis' ? (t.mapper?.postgisAdvantage || 'Direkte til PostGIS') : (t.mapper?.gpkgAdvantage || 'Alt kjøres i nettleseren via GDAL WebAssembly — ingen installasjon nødvendig.')}
                      </p>
                   </div>
                   
                   <div className="space-y-2">
-                     <div className="flex items-center gap-2 text-indigo-700">
+                     <div className="flex items-center gap-2 text-emerald-700">
                         <Globe size={16} />
-                        <h5 className="text-[10px] font-black uppercase tracking-widest">{t.mapper.scalableArch}</h5>
+                        <h5 className="text-[10px] font-black uppercase tracking-widest">Støttede formater</h5>
                      </div>
                      <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                        {t.mapper.intro}
+                        GeoPackage, Shapefile, GeoJSON, GML, KML, FlatGeobuf, CSV, GPX, MapInfo TAB, DXF, og mange flere via GDAL.
                      </p>
                   </div>
                </div>

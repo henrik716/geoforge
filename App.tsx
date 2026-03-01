@@ -62,6 +62,7 @@ const App: React.FC = () => {
   const [dirty, setDirty] = useState(false);
   const [quickPublishSummary, setQuickPublishSummary] = useState<InferredDataSummary | null>(null);
   const [isParsingGpkg, setIsParsingGpkg] = useState(false);
+  const [transformedData, setTransformedData] = useState<{ blob: Blob; filename: string } | null>(null);
 
   const isDesktop = windowWidth >= 1024;
 
@@ -249,6 +250,8 @@ const App: React.FC = () => {
       });
       setSelectedId(model.id);
       setQuickPublishSummary(summary);
+      // Gjør den droppede filen tilgjengelig for "inkluder data i repo"
+      setTransformedData({ blob: file, filename: file.name });
       setActiveTab('quick-publish');
     } catch (err) {
       alert(t.importGisError || "Could not read file");
@@ -277,7 +280,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 overflow-hidden text-slate-900 font-sans selection:bg-indigo-500/20">
-      <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".geojson,.json,.gpkg,.sqlite,.sql, .gml" className="hidden" />
+      <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".geojson,.json,.gpkg,.sqlite,.sql,.gml,.kml,.kmz,.shp,.fgb,.csv,.gpx,.tab,.mif,.dxf" className="hidden" />
       {showGuide && <Guide onClose={() => { setShowGuide(false); localStorage.setItem('guide_seen', 'true'); }} t={t} />}
       {showGithubImport && <GithubImportDialog t={t} onClose={() => setShowGithubImport(false)} onImport={handleImportModel} />}
       {showUrlImport && <UrlImportDialog t={t} onClose={() => setShowUrlImport(false)} onImport={handleUrlImportSuccess} />}
@@ -313,6 +316,7 @@ const App: React.FC = () => {
           onUpdateModel={handleUpdateModel}
           onBack={() => setActiveTab('landing')}
           onOpenEditor={() => setActiveTab('editor')}
+          dataBlob={transformedData}
         />
       )}
 
@@ -337,6 +341,8 @@ const App: React.FC = () => {
               }
               setSelectedId(id); 
               setDirty(false); 
+              setTransformedData(null);
+              setQuickPublishSummary(null);
               setActiveTab('editor'); 
             }} 
             onNew={handleNewModel} 
@@ -371,7 +377,23 @@ const App: React.FC = () => {
                   <div className="p-2 rounded-xl bg-white border border-slate-200 shadow-sm group-hover:border-indigo-200 group-hover:bg-indigo-50 transition-all"><ChevronLeft size={16} /></div>
                   {t.cancel}
                 </button>
-                <DataMapper model={selectedModel} t={t} />
+                <DataMapper model={selectedModel} t={t} onTransformedData={(blob, filename) => {
+                  setTransformedData({ blob, filename });
+                  // Generer summary fra modellen slik at QuickPublish har det den trenger
+                  const summary = {
+                    filename,
+                    layers: selectedModel.layers.map(l => ({
+                      tableName: l.name,
+                      featureCount: 0,
+                      geometryType: l.geometryType,
+                      columnCount: l.properties.length,
+                      srid: parseInt(selectedModel.crs?.replace('EPSG:', '') || '25833'),
+                    })),
+                    srid: parseInt(selectedModel.crs?.replace('EPSG:', '') || '25833'),
+                  };
+                  setQuickPublishSummary(summary);
+                  setActiveTab('quick-publish');
+                }} />
               </div>
             ) : activeTab === 'deploy' ? (
               <div className="flex-1 overflow-y-auto p-4 md:p-10 lg:p-14 min-w-0 custom-scrollbar scroll-smooth">

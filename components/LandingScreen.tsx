@@ -50,7 +50,8 @@ const LandingScreen: React.FC<LandingScreenProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
           {/* Path 1: Publish data */}
-          <div className="group relative bg-white rounded-[32px] border-2 border-slate-200 hover:border-emerald-400 p-8 md:p-10 space-y-6 transition-all duration-300 hover:shadow-xl hover:shadow-emerald-100/50">
+          {/* Endret fra space-y-6 til flex flex-col gap-6 for å tillate strekking */}
+          <div className="group relative bg-white rounded-[32px] border-2 border-slate-200 hover:border-emerald-400 p-8 md:p-10 flex flex-col gap-6 transition-all duration-300 hover:shadow-xl hover:shadow-emerald-100/50">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:scale-110 transition-transform">
                 <Upload size={28} />
@@ -62,12 +63,13 @@ const LandingScreen: React.FC<LandingScreenProps> = ({
             </div>
 
             {/* Dropzone */}
+            {/* Lagt til flex-1 for å fylle høyden, og justify-center for å midtstille innholdet */}
             <div
               onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
               onDragLeave={() => setIsDragOver(false)}
               onDrop={handleDrop}
               onClick={() => !isParsing && fileInputRef.current?.click()}
-              className={`relative cursor-pointer rounded-2xl border-2 border-dashed p-10 flex flex-col items-center gap-3 transition-all duration-300 ${
+              className={`relative cursor-pointer rounded-2xl border-2 border-dashed p-10 flex flex-1 flex-col items-center justify-center gap-3 transition-all duration-300 ${
                 isParsing
                   ? 'border-emerald-300 bg-emerald-50'
                   : isDragOver
