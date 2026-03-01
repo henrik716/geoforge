@@ -1,4 +1,3 @@
-
 export interface CommitInfo {
   sha: string;
   message: string;
@@ -111,7 +110,8 @@ export const pushDeployKit = async (
   files: Record<string, string>,
   commitMessage: string,
   createPR: boolean = false,
-  prTitle?: string
+  prTitle?: string,
+  binaryFiles?: Record<string, Blob>
 ): Promise<DeployPushResult> => {
   const headers = {
     ...ghHeaders(token),
@@ -149,6 +149,38 @@ export const pushDeployKit = async (
         type: 'blob',
         sha: blobData.sha,
       });
+    }
+
+    // 3b. Create blobs for binary files (e.g., GeoPackage)
+    if (binaryFiles) {
+      for (const [filePath, blob] of Object.entries(binaryFiles)) {
+        const fullPath = basePath ? `${basePath}/${filePath}` : filePath;
+        const arrayBuffer = await blob.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        // Convert to base64 in chunks to avoid call stack overflow
+        let base64 = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          const chunk = bytes.subarray(i, i + chunkSize);
+          base64 += String.fromCharCode(...chunk);
+        }
+        base64 = btoa(base64);
+
+        const blobRes = await fetch(`${api}/git/blobs`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ content: base64, encoding: 'base64' }),
+        });
+        if (!blobRes.ok) throw new Error(`Failed to create blob for ${filePath}`);
+        const blobData = await blobRes.json();
+
+        treeItems.push({
+          path: fullPath,
+          mode: '100644',
+          type: 'blob',
+          sha: blobData.sha,
+        });
+      }
     }
 
     // 4. Create a new tree

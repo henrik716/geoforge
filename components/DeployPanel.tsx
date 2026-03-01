@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useId } from 'react';
+import React, { useState, useMemo, useId, useRef } from 'react';
 import {
   Database, Cloud, Zap, Server, ChevronRight, ChevronDown,
-  Check, Eye, EyeOff, Table, Clock, RefreshCw, Package,
+  Check, Eye, EyeOff, Table, Clock, RefreshCw, Package, Upload, X,
   Layers, FileCode, Shield, Link2, ArrowRight, DatabaseZap,
-  Settings2, FileText, Info, Globe, Github, ExternalLink, Download, GitPullRequest
+  Settings2, FileText, Info, Globe, Github, ExternalLink, Download, GitPullRequest, AlertTriangle
 } from 'lucide-react';
 import {
   DataModel, SourceConnection, SourceType, DeployTarget,
@@ -92,6 +92,9 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
   const d = t.deploy; 
   const [step, setStep] = useState(0);
   const [sourceType, setSourceType] = useState<SourceType | null>(null);
+  const [includeData, setIncludeData] = useState(false);
+  const [localDataFile, setLocalDataFile] = useState<{ blob: Blob; filename: string } | null>(null);
+  const gpkgFileInputRef = useRef<HTMLInputElement>(null);
 
   // Connection states
   const [pgConfig, setPgConfig] = useState<PostgresConfig>({
@@ -208,9 +211,13 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
     try {
       const files = generateDeployFiles(model, source, lang, deployTarget);
       const commitMsg = `[${model.version}] Deploy ${model.name}`;
+      
+      const binaryFiles: Record<string, Blob> | undefined = 
+        includeData && localDataFile ? { [`data/${localDataFile.filename}`]: localDataFile.blob } : undefined;
+      
       const result = await pushDeployKit(
         ghToken, ghRepo, ghBranch, ghBasePath, files, commitMsg,
-        willCreatePR, `Deploy: ${model.name} v${model.version}`
+        willCreatePR, `Deploy: ${model.name} v${model.version}`, binaryFiles
       );
       setPublishResult(result);
       setPublishStatus(result.success ? 'success' : 'error');
@@ -224,7 +231,8 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
   const handleDownloadZip = async () => {
     const source = buildSource();
     if (!source) return;
-    await exportDeployKit(model, source, lang, deployTarget);
+    const binaryFilesForZip = includeData && localDataFile ? { [`data/${localDataFile.filename}`]: localDataFile.blob } : undefined;
+    await exportDeployKit(model, source, lang, deployTarget, binaryFilesForZip);
   };
 
   const stepIcons = [Database, Link2, Table, Github];
@@ -351,6 +359,32 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
                   onChange={v => setGpkgConfig(p => ({ ...p, filename: v }))} 
                   hint={d.gpkgHint} 
                 />
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">{d.includeDataFile}</label>
+                  <input type="file" ref={gpkgFileInputRef} className="hidden" accept=".gpkg,.sqlite" onChange={e => {
+                    const f = e.target.files?.[0];
+                    if (f) {
+                      setLocalDataFile({ blob: f, filename: f.name });
+                      setGpkgConfig(p => ({ ...p, filename: f.name }));
+                      setIncludeData(true);
+                    }
+                  }} />
+                  {localDataFile ? (
+                    <div className="flex items-center gap-3 bg-emerald-50 text-emerald-700 px-5 py-3 rounded-2xl border border-emerald-200">
+                      <Check size={16} strokeWidth={3} />
+                      <span className="text-xs font-black truncate flex-1">{localDataFile.filename}</span>
+                      <span className="text-[10px] font-bold text-emerald-500">{localDataFile.blob.size < 1024 * 1024 ? `${(localDataFile.blob.size / 1024).toFixed(1)} KB` : `${(localDataFile.blob.size / (1024 * 1024)).toFixed(1)} MB`}</span>
+                      <button onClick={() => { setLocalDataFile(null); setIncludeData(false); }} className="text-emerald-400 hover:text-rose-500 transition-colors"><X size={16}/></button>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => gpkgFileInputRef.current?.click()}
+                      className="w-full flex items-center justify-center gap-3 px-5 py-4 rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 hover:border-violet-300 hover:text-violet-500 transition-all text-xs font-bold"
+                    >
+                      <Upload size={16} /> {d.includeDataUpload}
+                    </button>
+                  )}
+                </div>
               </React.Fragment>
             )}
           </div>
@@ -640,31 +674,57 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
             )}
           </div>
 
-          {/* File inventory */}
+          {/* File inventory — dynamisk basert på deployTarget */}
           <div className="px-8 md:px-12 pb-8 space-y-6">
             <div className="flex items-center gap-3">
               <div className="w-2 h-2 rounded-full bg-emerald-500" />
               <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">{d.packageContents}</h4>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {[
-                { file: 'model.json', desc: d.files?.model || 'Model definition', icon: <FileCode size={16}/> },
-                { file: 'docker-compose.yml', desc: d.files?.docker || 'Orchestration', icon: <Cloud size={16}/> },
-                { file: 'Dockerfile', desc: d.files?.dockerfile || 'Container image', icon: <Package size={16}/> },
-                { file: 'pygeoapi-config.yml', desc: sourceType === 'databricks' || sourceType === 'geopackage' ? (d.files?.pygeoapiGpkg || 'File-based OGC API') : (d.files?.pygeoapiPg || 'Live DB'), icon: <Settings2 size={16}/> },
-                { file: 'project.qgs', desc: d.files?.qgis || 'Cartography', icon: <FileText size={16} /> },
-                sourceType !== 'geopackage' && { file: 'delta_export.py', desc: d.files?.delta || 'Sync engine', icon: <RefreshCw size={16}/> },
-                { file: '.env.template', desc: d.files?.env || 'Secrets template', icon: <Shield size={16}/> },
-                { file: '.github/workflows/deploy.yml', desc: d.files?.workflow || 'CI/CD pipeline', icon: <Zap size={16}/> },
-              ].filter(Boolean).map((item: any, i) => (
-                <div key={i} className="flex gap-4 p-5 bg-slate-800/40 border border-slate-700/50 rounded-2xl group hover:bg-slate-800 hover:border-violet-500/30 transition-all duration-300">
-                  <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-violet-400 border border-slate-700 shrink-0 group-hover:scale-110 transition-transform">{item.icon}</div>
-                  <div>
-                    <p className="text-sm font-mono font-bold text-slate-100 mb-0.5">{item.file}</p>
-                    <p className="text-[10px] text-slate-500 font-medium">{item.desc}</p>
+              {(() => {
+                const hasWms = model.layers.some(l => l.geometryType !== 'None');
+                const isGpkg = sourceType === 'geopackage';
+                const items: { file: string; desc: string; icon: React.ReactNode }[] = [
+                  { file: 'model.json', desc: d.files?.model || 'Model definition', icon: <FileCode size={16}/> },
+                  { file: 'Dockerfile', desc: d.files?.dockerfile || 'Container image', icon: <Package size={16}/> },
+                  { file: 'pygeoapi-config.yml', desc: isGpkg ? (d.files?.pygeoapiGpkg || 'File-based OGC API') : (d.files?.pygeoapiPg || 'Live DB'), icon: <Settings2 size={16}/> },
+                ];
+                if (hasWms) {
+                  items.push({ file: 'project.qgs', desc: d.files?.qgis || 'Cartography', icon: <FileText size={16}/> });
+                }
+                if (hasWms && deployTarget !== 'docker-compose') {
+                  items.push({ file: 'Dockerfile.qgis', desc: d.files?.dockerfileQgis || 'QGIS Server image', icon: <Package size={16}/> });
+                }
+                if (!isGpkg) {
+                  items.push({ file: 'delta_export.py', desc: d.files?.delta || 'Sync engine', icon: <RefreshCw size={16}/> });
+                }
+                if (deployTarget === 'docker-compose' || deployTarget === 'ghcr') {
+                  items.push({ file: 'docker-compose.yml', desc: d.files?.docker || 'Orchestration', icon: <Cloud size={16}/> });
+                }
+                if (deployTarget === 'fly') {
+                  items.push({ file: 'fly.toml', desc: d.files?.flyToml || 'Fly.io config', icon: <Cloud size={16}/> });
+                  if (hasWms) {
+                    items.push({ file: 'fly.qgis.toml', desc: d.files?.flyQgisToml || 'Fly.io QGIS app', icon: <Cloud size={16}/> });
+                  }
+                }
+                if (deployTarget === 'railway') {
+                  items.push({ file: 'railway.json', desc: d.files?.railwayJson || 'Railway config', icon: <Cloud size={16}/> });
+                }
+                items.push(
+                  { file: '.env.template', desc: d.files?.env || 'Secrets template', icon: <Shield size={16}/> },
+                  { file: '.github/workflows/deploy.yml', desc: d.files?.workflow || 'CI/CD pipeline', icon: <Zap size={16}/> },
+                  { file: 'README.md', desc: d.files?.readme || 'Documentation', icon: <FileText size={16}/> },
+                );
+                return items.map((item, i) => (
+                  <div key={i} className="flex gap-4 p-5 bg-slate-800/40 border border-slate-700/50 rounded-2xl group hover:bg-slate-800 hover:border-violet-500/30 transition-all duration-300">
+                    <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-violet-400 border border-slate-700 shrink-0 group-hover:scale-110 transition-transform">{item.icon}</div>
+                    <div>
+                      <p className="text-sm font-mono font-bold text-slate-100 mb-0.5">{item.file}</p>
+                      <p className="text-[10px] text-slate-500 font-medium">{item.desc}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ));
+              })()}
             </div>
           </div>
 
@@ -725,6 +785,32 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
               </pre>
             )}
           </div>
+
+          {/* Include data toggle — bare for geopackage med opplastet fil */}
+          {sourceType === 'geopackage' && localDataFile && (
+            <div className="px-8 py-6 border-t border-slate-800 bg-slate-800/60">
+              <label className="flex items-start gap-4 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={includeData} 
+                  onChange={e => setIncludeData(e.target.checked)}
+                  className="mt-1 w-5 h-5 rounded-lg border-2 border-slate-600 text-indigo-500 focus:ring-indigo-500 cursor-pointer bg-slate-900"
+                />
+                <div className="flex-1">
+                  <span className="text-sm font-black text-white block">{d.includeData}</span>
+                  <span className="text-xs text-slate-400 font-medium">
+                    {localDataFile.filename} ({localDataFile.blob.size < 1024 * 1024 ? `${(localDataFile.blob.size / 1024).toFixed(1)} KB` : `${(localDataFile.blob.size / (1024 * 1024)).toFixed(1)} MB`}) → <code className="bg-slate-700 px-1.5 py-0.5 rounded text-[10px] font-mono text-indigo-300">data/</code>
+                  </span>
+                  {localDataFile.blob.size > 50 * 1024 * 1024 && includeData && (
+                    <div className="flex items-center gap-2 mt-2 text-amber-400 text-xs font-bold">
+                      <AlertTriangle size={14} />
+                      {d.includeDataWarnShort}
+                    </div>
+                  )}
+                </div>
+              </label>
+            </div>
+          )}
 
           {/* Footer with actions */}
           <div className="p-8 bg-slate-900 border-t border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-4">

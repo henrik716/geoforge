@@ -1580,7 +1580,8 @@ export const exportDeployKit = async (
   model: DataModel,
   source: SourceConnection,
   lang: string = 'no',
-  target: DeployTarget = 'docker-compose'
+  target: DeployTarget = 'docker-compose',
+  binaryFiles?: Record<string, Blob>
 ) => {
   const files = generateDeployFiles(model, source, lang, target);
 
@@ -1592,6 +1593,13 @@ export const exportDeployKit = async (
     Object.entries(files).forEach(([name, content]) => {
       zip.file(`${folderName}/${name}`, content);
     });
+
+    // Legg til binærfiler (f.eks. GeoPackage) i data/-mappen
+    if (binaryFiles) {
+      for (const [name, blob] of Object.entries(binaryFiles)) {
+        zip.file(`${folderName}/${name}`, blob);
+      }
+    }
 
     zip.folder(`${folderName}/data/output`);
 

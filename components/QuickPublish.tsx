@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   ChevronLeft, Check, Database, Tag, Github, Layers, ArrowRight,
   RefreshCw, ExternalLink, Info, GitPullRequest, Download, X, Paintbrush,
-  Cloud, Server, Package
+  Cloud, Server, Package, AlertTriangle
 } from 'lucide-react';
 import { DataModel, ModelMetadata, LayerStyle, DeployTarget } from '../types';
 import { InferredDataSummary } from '../utils/importUtils';
@@ -18,6 +18,7 @@ interface QuickPublishProps {
   onUpdateModel: (model: DataModel) => void;
   onBack: () => void;
   onOpenEditor: () => void;
+  dataBlob?: { blob: Blob; filename: string } | null;
 }
 
 const GEOM_ICONS: Record<string, string> = {
@@ -26,7 +27,7 @@ const GEOM_ICONS: Record<string, string> = {
 };
 
 const QuickPublish: React.FC<QuickPublishProps> = ({
-  model, summary, t, lang, onUpdateModel, onBack, onOpenEditor
+  model, summary, t, lang, onUpdateModel, onBack, onOpenEditor, dataBlob
 }) => {
   const q = t.quickPublish || {};
   const md = t.metadata || {};
@@ -36,6 +37,7 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
   const [selectedLayers, setSelectedLayers] = useState<Set<string>>(
     new Set(model.layers.map(l => l.id))
   );
+  const [includeData, setIncludeData] = useState(false);
 
   // Metadata state
   const meta: ModelMetadata = model.metadata || {
@@ -78,6 +80,12 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
 
   const willCreatePR = repoAccess !== null && !repoAccess.isOwner;
 
+  const formatBlobSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   const checkAccess = async () => {
     if (!ghRepo || !ghToken) { setRepoAccess(null); setRepoCheckStatus('idle'); return; }
     setRepoCheckStatus('checking');
@@ -113,9 +121,14 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
       };
       const files = generateDeployFiles(publishModel, source, lang, deployTarget);
       const commitMsg = `[${publishModel.version}] Publish ${publishModel.name}`;
+      
+      // Build binary files map if data inclusion is enabled
+      const binaryFiles: Record<string, Blob> | undefined = 
+        includeData && dataBlob ? { [`data/${dataBlob.filename}`]: dataBlob.blob } : undefined;
+      
       const result = await pushDeployKit(
         ghToken, ghRepo, ghBranch, ghBasePath, files, commitMsg,
-        willCreatePR, `Publish: ${publishModel.name}`
+        willCreatePR, `Publish: ${publishModel.name}`, binaryFiles
       );
       setPublishResult(result);
       setPublishStatus(result.success ? 'success' : 'error');
@@ -138,7 +151,8 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
         }])
       ),
     };
-    await exportDeployKit(publishModel, source, lang, deployTarget);
+    const binaryFilesForZip = includeData && dataBlob ? { [`data/${dataBlob.filename}`]: dataBlob.blob } : undefined;
+    await exportDeployKit(publishModel, source, lang, deployTarget, binaryFilesForZip);
   };
 
   // Helper: update a single layer's style
@@ -546,6 +560,38 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
             <div className="p-6 bg-red-50 border border-red-200 rounded-2xl space-y-2">
               <span className="text-sm font-black text-red-700">{d.publishError}</span>
               <p className="text-xs text-red-500 font-mono">{publishResult?.error}</p>
+            </div>
+          )}
+
+          {/* Include data toggle */}
+          {dataBlob && (
+            <div className={`p-5 rounded-2xl border-2 transition-all ${includeData ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
+              <label className="flex items-start gap-4 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={includeData} 
+                  onChange={e => setIncludeData(e.target.checked)}
+                  className="mt-1 w-5 h-5 rounded-lg border-2 border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                />
+                <div className="flex-1">
+                  <span className="text-sm font-black text-slate-800 block">{d.includeData}</span>
+                  <span className="text-xs text-slate-500 font-medium">
+                    {dataBlob.filename} ({formatBlobSize(dataBlob.blob.size)}) {d.includeDataDesc} <code className="bg-slate-200 px-1.5 py-0.5 rounded text-[10px] font-mono">data/</code>
+                  </span>
+                  {dataBlob.blob.size > 50 * 1024 * 1024 && includeData && (
+                    <div className="flex items-center gap-2 mt-2 text-amber-700 text-xs font-bold">
+                      <AlertTriangle size={14} />
+                      {d.includeDataWarn50}
+                    </div>
+                  )}
+                  {dataBlob.blob.size > 100 * 1024 * 1024 && includeData && (
+                    <div className="flex items-center gap-2 mt-1 text-rose-700 text-xs font-bold">
+                      <AlertTriangle size={14} />
+                      {d.includeDataWarn100}
+                    </div>
+                  )}
+                </div>
+              </label>
             </div>
           )}
 
