@@ -4,15 +4,17 @@ import {
   RefreshCw, ExternalLink, Info, GitPullRequest, Download, X, Paintbrush,
   Cloud, Server, Package, AlertTriangle
 } from 'lucide-react';
-import { DataModel, ModelMetadata, LayerStyle, DeployTarget } from '../types';
+import { DataModel, ModelMetadata, LayerStyle, DeployTarget, ImportValidationResult } from '../types';
 import { InferredDataSummary } from '../utils/importUtils';
 import LayerStyleEditor from './LayerStyleEditor';
+import ImportWarnings from './ImportWarnings';
 import { generateDeployFiles, exportDeployKit } from '../utils/deployUtils';
 import { pushDeployKit, checkRepoAccess, DeployPushResult } from '../utils/githubService';
 
 interface QuickPublishProps {
   model: DataModel;
   summary: InferredDataSummary;
+  validation?: ImportValidationResult;
   t: any;
   lang: string;
   onUpdateModel: (model: DataModel) => void;
@@ -27,7 +29,7 @@ const GEOM_ICONS: Record<string, string> = {
 };
 
 const QuickPublish: React.FC<QuickPublishProps> = ({
-  model, summary, t, lang, onUpdateModel, onBack, onOpenEditor, dataBlob
+  model, summary, validation, t, lang, onUpdateModel, onBack, onOpenEditor, dataBlob
 }) => {
   const q = t.quickPublish || {};
   const md = t.metadata || {};
@@ -114,14 +116,6 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
         publishModel.layers.map(l => {
           const summaryLayer = summary.layers.find(sl => sl.tableName === l.name);
           const primaryKeyColumn = summaryLayer?.primaryKeyColumn || 'fid';
-          
-          console.log('Layer mapping debug:', {
-            layerName: l.name,
-            layerId: l.id,
-            summaryLayer,
-            primaryKeyColumn,
-            sourceTable: l.name
-          });
           
           return [l.id, {
             sourceTable: l.name, // Use actual table name from GeoPackage import
@@ -241,14 +235,6 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
       {/* STEP 0: Review tables */}
       {step === 0 && (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400">
-          <div className="space-y-2">
-            <h2 className="text-2xl font-black tracking-tight text-slate-900">{q.step1Title}</h2>
-            <p className="text-sm text-slate-400 font-medium">{q.step1Desc}</p>
-          </div>
-
-          <div className="space-y-3">
-            {summary.layers.map((layer, i) => {
-              const modelLayer = model.layers[i];
               if (!modelLayer) return null;
               const isSelected = selectedLayers.has(modelLayer.id);
               return (

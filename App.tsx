@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Plus, ChevronLeft, ChevronRight, Layers } from 'lucide-react';
-import { DataModel, ViewTab, Language } from './types';
+import { DataModel, ViewTab, Language, ImportValidationResult, ImportWarning } from './types';
 import { i18n, createEmptyModel } from './constants';
 import ModelEditor from './components/ModelEditor';
 import Sidebar from './components/Sidebar';
@@ -61,6 +61,8 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ViewTab>('landing');
   const [dirty, setDirty] = useState(false);
   const [quickPublishSummary, setQuickPublishSummary] = useState<InferredDataSummary | null>(null);
+  const [quickPublishValidation, setQuickPublishValidation] = useState<ImportValidationResult | null>(null);
+  const [deployValidation, setDeployValidation] = useState<ImportValidationResult | null>(null);
   const [isParsingGpkg, setIsParsingGpkg] = useState(false);
   const [transformedData, setTransformedData] = useState<{ blob: Blob; filename: string } | null>(null);
 
@@ -123,6 +125,13 @@ const App: React.FC = () => {
   useEffect(() => { localStorage.setItem('githubConfig', JSON.stringify(githubConfig)); }, [githubConfig]);
 
   const selectedModel = models.find(m => m.id === selectedId);
+
+  // Validate when switching to deploy tab
+  useEffect(() => {
+    if (activeTab === 'deploy' && selectedModel) {
+      validateForDeploy(selectedModel);
+    }
+  }, [activeTab, selectedModel]);
 
   const handleUndo = () => {
     const prevModels = undo();
@@ -223,7 +232,7 @@ const App: React.FC = () => {
   const handleGpkgDrop = async (file: File) => {
     setIsParsingGpkg(true);
     try {
-      const { model, summary } = await processAnyFile(file);
+      const { model, summary, validation } = await processAnyFile(file);
       // Auto-fill bbox into metadata if available
       if (summary.bbox) {
         model.metadata = {
@@ -250,6 +259,7 @@ const App: React.FC = () => {
       });
       setSelectedId(model.id);
       setQuickPublishSummary(summary);
+      setQuickPublishValidation(validation);
       // Gjør den droppede filen tilgjengelig for "inkluder data i repo"
       setTransformedData({ blob: file, filename: file.name });
       setActiveTab('quick-publish');
@@ -268,6 +278,43 @@ const App: React.FC = () => {
       handleImportModel(processOpenApiToModel(json, name));
     } else {
       handleImportModel(processGeoJsonToModel(json, name));
+    }
+  };
+
+  // Validate current model for deploy tab
+  const validateForDeploy = async (model: DataModel) => {
+    try {
+      // Create a simple validation based on model layers
+      const warnings: ImportWarning[] = [];
+      
+      model.layers.forEach(layer => {
+        const hasIdField = layer.properties.some(p => 
+          p.name.toLowerCase() === 'id' || p.name.toLowerCase() === 'fid'
+        );
+        
+        if (!hasIdField) {
+          warnings.push({
+            type: 'no_primary_key',
+            layerName: layer.name,
+            columnName: 'none',
+            message: `Layer '${layer.name}' has no ID field (id or fid).`,
+            suggestion: "Add an INTEGER PRIMARY KEY column (e.g., 'id' or 'fid')",
+            severity: 'error'
+          });
+        }
+      });
+
+      const validation: ImportValidationResult = {
+        warnings,
+        errors: [],
+        isValid: warnings.filter(w => w.severity === 'error').length === 0,
+        canProceed: true
+      };
+      
+      setDeployValidation(validation);
+    } catch (error) {
+      console.error('Validation error:', error);
+      setDeployValidation(null);
     }
   };
 
@@ -311,6 +358,7 @@ const App: React.FC = () => {
         <QuickPublish
           model={selectedModel}
           summary={quickPublishSummary}
+          validation={quickPublishValidation}
           t={t}
           lang={lang}
           onUpdateModel={handleUpdateModel}
@@ -343,6 +391,8 @@ const App: React.FC = () => {
               setDirty(false); 
               setTransformedData(null);
               setQuickPublishSummary(null);
+              setQuickPublishValidation(null);
+              setDeployValidation(null);
               setActiveTab('editor'); 
             }} 
             onNew={handleNewModel} 
@@ -405,6 +455,7 @@ const App: React.FC = () => {
                   model={selectedModel} 
                   t={t} 
                   lang={lang}
+                  validation={deployValidation}
                   onSourceChange={(source) => {
                     handleUpdateModel({ ...selectedModel, sourceConnection: source });
                   }}

@@ -74,7 +74,7 @@ export const generatePygeoapiConfig = (
   yaml += `logging:\n  level: INFO\n\n`;
 
   // Metadata — enriched from model.metadata if available
-  const meta = model.metadata;
+  const meta = model.metadata || {};
   const keywords = meta?.keywords?.length ? meta.keywords : ['geospatial', model.namespace || 'data'];
   const licenseName = meta?.license || 'CC-BY-4.0';
   const licenseUrls: Record<string, string> = {
@@ -160,13 +160,6 @@ export const generatePygeoapiConfig = (
       yaml += `        table: ${sourceTable}\n`;
       yaml += `        id_field: ${mapping?.primaryKeyColumn || 'fid'}\n`;
       yaml += `        geom_field: ${layer.geometryColumnName || 'geom'}\n\n`;
-      console.log('GeoPackage provider config:', {
-        layerName: layer.name,
-        sourceTable,
-        primaryKeyColumn: mapping?.primaryKeyColumn || 'fid',
-        geometryColumn: layer.geometryColumnName || 'geom',
-        mapping
-      });
     }
   });
 
@@ -770,7 +763,15 @@ services:
     compose += `      - ./data:/data\n`;
   }
 
-  compose += `    env_file: .env\n    restart: unless-stopped\n`;
+  compose += `    env_file: .env\n`;
+  compose += `    entrypoint:\n`;
+  compose += `      - /bin/bash\n`;
+  compose += `      - -c\n`;
+  compose += `      - |\n`;
+  compose += `        pygeoapi openapi generate \${PYGEOAPI_CONFIG} --output-file \${PYGEOAPI_OPENAPI}\n`;
+  compose += `        pygeoapi asyncapi generate \${PYGEOAPI_CONFIG} --output-file /pygeoapi/local.asyncapi.yml\n`;
+  compose += `        pygeoapi serve\n`;
+  compose += `    restart: unless-stopped\n`;
 
   // WMS via QGIS Server (only if there are geometry layers)
   if (hasGeomLayers) {

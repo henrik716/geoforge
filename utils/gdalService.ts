@@ -12,7 +12,7 @@
  */
 
 import {
-  DataModel, Layer, ModelProperty, PropertyType, GeometryType, PropertyConstraints
+  DataModel, Layer, ModelProperty, PropertyType, GeometryType, PropertyConstraints, ImportValidationResult, ImportWarning, ImportError
 } from '../types';
 import { createEmptyModel, createEmptyProperty, createEmptyLayer } from '../constants';
 import { normalizeGeometryType, mapSqlTypeToPropertyType, InferredDataSummary, InferredLayerSummary } from './importUtils';
@@ -518,7 +518,7 @@ export const gdalInfoToModel = (
  */
 export const processFilesWithGdal = async (
   files: File | File[]
-): Promise<{ model: DataModel; summary: InferredDataSummary }> => {
+): Promise<{ model: DataModel; summary: InferredDataSummary; validation: ImportValidationResult }> => {
   const fileArray = Array.isArray(files) ? files : [files];
   const mainFile = fileArray[0];
 
@@ -538,7 +538,41 @@ export const processFilesWithGdal = async (
     result.summary.layers.push(...extra.summary.layers);
   }
 
-  return result;
+  // Validate ID fields for all layers
+  const warnings: ImportWarning[] = [];
+  const errors: ImportError[] = [];
+
+  console.log('🔍 GDAL VALIDATION - checking layers:', result.summary.layers.length);
+
+  for (const layerSummary of result.summary.layers) {
+    console.log('🔍 GDAL VALIDATION - layer:', layerSummary.tableName, 'pk:', layerSummary.primaryKeyColumn);
+    
+    // Check if layer has a proper primary key
+    const hasIdField = layerSummary.primaryKeyColumn && layerSummary.primaryKeyColumn !== 'fid';
+    
+    if (!hasIdField) {
+      console.log('🔍 GDAL VALIDATION - MISSING PK for:', layerSummary.tableName);
+      warnings.push({
+        type: 'no_primary_key',
+        layerName: layerSummary.tableName,
+        columnName: layerSummary.primaryKeyColumn || 'fid',
+        message: `Table '${layerSummary.tableName}' has no proper primary key column.`,
+        suggestion: "Add an INTEGER PRIMARY KEY column (e.g., 'id' or 'fid')",
+        severity: 'error'
+      });
+    }
+  }
+
+  console.log('🔍 GDAL VALIDATION - warnings generated:', warnings.length);
+
+  const validation: ImportValidationResult = {
+    warnings,
+    errors,
+    isValid: errors.length === 0 && warnings.filter(w => w.severity === 'error').length === 0,
+    canProceed: errors.length === 0
+  };
+
+  return { ...result, validation };
 };
 
 // ============================================================
