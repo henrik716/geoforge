@@ -117,6 +117,14 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
           const summaryLayer = summary.layers.find(sl => sl.tableName === l.name);
           const primaryKeyColumn = summaryLayer?.primaryKeyColumn || 'fid';
           
+          console.log('Layer mapping debug:', {
+            layerName: l.name,
+            layerId: l.id,
+            summaryLayer,
+            primaryKeyColumn,
+            sourceTable: l.name
+          });
+          
           return [l.id, {
             sourceTable: l.name, // Use actual table name from GeoPackage import
             fieldMappings: {},
@@ -235,6 +243,24 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
       {/* STEP 0: Review tables */}
       {step === 0 && (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400">
+          <div className="space-y-2">
+            <h2 className="text-2xl font-black tracking-tight text-slate-900">{q.step1Title}</h2>
+            <p className="text-sm text-slate-400 font-medium">{q.step1Desc}</p>
+          </div>
+
+          {/* Validation warnings */}
+          {validation && (
+            <ImportWarnings
+              key={`validation-${validation.warnings.length}-${validation.errors.length}`}
+              validation={validation}
+              t={t}
+              lang={lang}
+            />
+          )}
+
+          <div className="space-y-3">
+            {summary.layers.map((layer, i) => {
+              const modelLayer = model.layers[i];
               if (!modelLayer) return null;
               const isSelected = selectedLayers.has(modelLayer.id);
               return (
