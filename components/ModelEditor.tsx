@@ -517,7 +517,7 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
                   
                   {/* Contact */}
                   <div className="pt-6 space-y-4">
-                    <h4 className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{md.contactName ? md.contactOrganization?.split(' ')[0] ? '' : '' : ''}{lang === 'no' ? 'Kontaktinformasjon' : 'Contact information'}</h4>
+                    <h4 className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{lang === 'no' ? 'Kontaktinformasjon' : 'Contact information'}</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div>
                         <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.contactName}</label>
@@ -530,6 +530,33 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
                       <div>
                         <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.contactOrganization}</label>
                         <input type="text" value={meta.contactOrganization} onChange={e => updateMeta({ contactOrganization: e.target.value })} placeholder={md.contactOrganizationPlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Dataset URLs */}
+                  <div className="pt-6 space-y-4">
+                    <h4 className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{lang === 'no' ? 'Dataset-informasjon' : 'Dataset Information'}</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.datasetUrl}</label>
+                        <input 
+                          type="url" 
+                          value={meta.url || ''} 
+                          onChange={e => updateMeta({ url: e.target.value })} 
+                          placeholder={md.datasetUrlPlaceholder}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" 
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.termsOfService}</label>
+                        <input 
+                          type="url" 
+                          value={meta.termsOfService || ''} 
+                          onChange={e => updateMeta({ termsOfService: e.target.value })} 
+                          placeholder={md.termsOfServicePlaceholder}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" 
+                        />
                       </div>
                     </div>
                   </div>

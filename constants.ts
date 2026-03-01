@@ -362,6 +362,10 @@ export const i18n = {
       keywordsPlaceholder: "Skriv nøkkelord og trykk Enter…",
       theme: "Tema (INSPIRE)",
       license: "Lisens",
+      datasetUrl: "Datasett URL",
+      datasetUrlPlaceholder: "https://eksempel.no/datasett",
+      termsOfService: "Bruksvilkår", 
+      termsOfServicePlaceholder: "https://eksempel.no/vilkar",
       licenses: {
         'CC-BY-4.0': "CC BY 4.0 (Navngivelse)",
         'CC0-1.0': "CC0 1.0 (Ingen rettigheter)",
@@ -976,6 +980,10 @@ export const i18n = {
       keywordsPlaceholder: "Type a keyword and press Enter…",
       theme: "Theme (INSPIRE)",
       license: "License",
+      datasetUrl: "Dataset URL",
+      datasetUrlPlaceholder: "https://example.com/dataset",
+      termsOfService: "Terms of Service",
+      termsOfServicePlaceholder: "https://example.com/terms",
       licenses: {
         'CC-BY-4.0': "CC BY 4.0 (Attribution)",
         'CC0-1.0': "CC0 1.0 (No rights reserved)",

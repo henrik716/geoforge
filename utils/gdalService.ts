@@ -467,6 +467,13 @@ export const gdalInfoToModel = (
         };
       });
 
+    // Find primary key column
+    let primaryKeyColumn = 'fid';
+    const pkField = layerInfo.fields.find(f => f.uniqueConstraint);
+    if (pkField) {
+      primaryKeyColumn = pkField.name;
+    }
+
     layers.push({
       ...createEmptyLayer(layerInfo.name),
       properties,
@@ -480,6 +487,7 @@ export const gdalInfoToModel = (
       geometryType,
       columnCount: properties.length,
       srid: srid || globalSrid,
+      primaryKeyColumn,
     });
   }
 

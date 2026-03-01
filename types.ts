@@ -98,6 +98,8 @@ export interface ModelMetadata {
   };
   temporalExtentFrom: string;
   temporalExtentTo: string;
+  url?: string;                    // Dataset URL
+  termsOfService?: string;         // Terms of service URL
 }
 
 export interface DataModel {
