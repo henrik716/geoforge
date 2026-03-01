@@ -1,4 +1,4 @@
-import { DataModel, Layer, ModelProperty, PropertyType, GeometryType, PropertyConstraints } from '../types';
+import { DataModel, Layer, ModelProperty, PropertyType, GeometryType, PropertyConstraints, ImportWarning, ImportError, ImportValidationResult } from '../types';
 import { createEmptyModel, createEmptyProperty, createEmptyLayer } from '../constants';
 
 declare var initSqlJs: any;
@@ -250,7 +250,112 @@ export interface InferredDataSummary {
   bbox?: { west: number; south: number; east: number; north: number };
 }
 
-export const processGpkgFile = async (file: File): Promise<{ model: DataModel; summary: InferredDataSummary }> => {
+// Validation function for GeoPackage ID field issues
+export const validateGeoPackageIdFields = async (
+  db: any,
+  tableName: string,
+  primaryKeyColumn: string
+): Promise<ImportWarning[]> => {
+  console.log('🔍 VALIDATION CALLED for:', tableName, 'with PK:', primaryKeyColumn);
+  const warnings: ImportWarning[] = [];
+
+  // Check if primary key is actually a primary key constraint
+  const columnsRes = db.exec(`PRAGMA table_info("${tableName}")`);
+  console.log('🔍 COLUMNS DEBUG:', columnsRes);
+  let foundPkColumn = false;
+  let pkColumnType = '';
+  let pkHasNulls = false;
+
+  if (columnsRes.length > 0) {
+    for (const col of columnsRes[0].values) {
+      const name = col[1];
+      const type = col[2];
+      const notNull = col[3] === 1;
+      const isPk = col[5] === 1;
+      console.log('🔍 COLUMN DEBUG:', { name, type, notNull, isPk });
+
+      if (name === primaryKeyColumn) {
+        foundPkColumn = isPk;
+        pkColumnType = type.toLowerCase();
+        console.log('🔍 PK COLUMN FOUND:', { foundPkColumn, pkColumnType });
+        
+        // Check for NULL values in primary key column
+        try {
+          const nullCheckRes = db.exec(`SELECT COUNT(*) FROM "${tableName}" WHERE "${primaryKeyColumn}" IS NULL`);
+          if (nullCheckRes.length > 0 && Number(nullCheckRes[0].values[0][0]) > 0) {
+            pkHasNulls = true;
+            console.log('🔍 NULL VALUES FOUND');
+          }
+        } catch {
+          // Ignore errors in NULL check
+        }
+        break;
+      }
+    }
+  }
+
+  // Check for missing primary key
+  if (!foundPkColumn || primaryKeyColumn === 'fid') {
+    warnings.push({
+      type: 'no_primary_key',
+      layerName: tableName,
+      columnName: primaryKeyColumn,
+      message: `Table '${tableName}' has no proper primary key column.`,
+      suggestion: "Add an INTEGER PRIMARY KEY column (e.g., 'id' or 'fid')",
+      severity: 'error'
+    });
+  }
+
+  // Check for non-integer primary key
+  if (foundPkColumn && !pkColumnType.includes('int')) {
+    warnings.push({
+      type: 'non_integer_pk',
+      layerName: tableName,
+      columnName: primaryKeyColumn,
+      message: `Primary key column '${primaryKeyColumn}' in table '${tableName}' is not of type INTEGER.`,
+      suggestion: "Change column type to INTEGER for best performance and compatibility",
+      severity: 'warning'
+    });
+  }
+
+  // Check for NULL values in primary key
+  if (pkHasNulls) {
+    warnings.push({
+      type: 'null_pk',
+      layerName: tableName,
+      columnName: primaryKeyColumn,
+      message: `Primary key column '${primaryKeyColumn}' in table '${tableName}' contains NULL values.`,
+      suggestion: "Ensure all rows have values in the primary key column",
+      severity: 'error'
+    });
+  }
+
+  // Check for duplicate values in primary key
+  try {
+    const duplicateCheckRes = db.exec(`SELECT "${primaryKeyColumn}", COUNT(*) as count FROM "${tableName}" GROUP BY "${primaryKeyColumn}" HAVING count > 1`);
+    if (duplicateCheckRes.length > 0 && duplicateCheckRes[0].values.length > 0) {
+      warnings.push({
+        type: 'non_unique_pk',
+        layerName: tableName,
+        columnName: primaryKeyColumn,
+        message: `Primary key column '${primaryKeyColumn}' in table '${tableName}' has duplicate values.`,
+        suggestion: "Remove duplicate values or add a proper AUTOINCREMENT primary key",
+        severity: 'error'
+      });
+    }
+  } catch {
+    // Ignore errors in duplicate check
+  }
+
+  console.log('🔍 FINAL WARNINGS:', warnings);
+  return warnings;
+};
+
+export const processGpkgFile = async (file: File): Promise<{ 
+  model: DataModel; 
+  summary: InferredDataSummary; 
+  validation: ImportValidationResult 
+}> => {
   const SQL = await initSqlJs({ locateFile: () => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.wasm` });
   const arrayBuffer = await file.arrayBuffer();
   const db = new SQL.Database(new Uint8Array(arrayBuffer));
@@ -306,16 +411,21 @@ export const processGpkgFile = async (file: File): Promise<{ model: DataModel; s
 
       // Find primary key column
       let primaryKeyColumn = 'fid';
+      console.log('🔍 PK DETECTION DEBUG - columnsRes:', columnsRes);
       if (columnsRes.length > 0) {
+        console.log('🔍 PK DETECTION DEBUG - columns:', columnsRes[0].values);
         for (const col of columnsRes[0].values) {
           const name = col[1];
           const isPk = col[5] === 1;
+          console.log('🔍 PK DETECTION DEBUG - column:', { name, isPk, colIndex5: col[5] });
           if (isPk) {
             primaryKeyColumn = name;
+            console.log('🔍 PK DETECTION DEBUG - FOUND PK:', primaryKeyColumn);
             break;
           }
         }
       }
+      console.log('🔍 PK DETECTION DEBUG - FINAL primaryKeyColumn:', primaryKeyColumn);
 
       if (columnsRes.length > 0) {
         columnsRes[0].values.forEach((col: any) => {
@@ -354,6 +464,34 @@ export const processGpkgFile = async (file: File): Promise<{ model: DataModel; s
     }
   }
 
+  // Run validation on all layers BEFORE closing the database
+  const allWarnings: ImportWarning[] = [];
+  const allErrors: ImportError[] = [];
+
+  for (const layerSummary of layerSummaries) {
+    try {
+      const warnings = await validateGeoPackageIdFields(db, layerSummary.tableName, layerSummary.primaryKeyColumn);
+      console.log('🔍 LAYER VALIDATION RESULT:', { tableName: layerSummary.tableName, warnings });
+      allWarnings.push(...warnings);
+    } catch (error) {
+      allErrors.push({
+        type: 'critical',
+        layerName: layerSummary.tableName,
+        message: `Failed to validate layer '${layerSummary.tableName}'`,
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  const validation: ImportValidationResult = {
+    warnings: allWarnings,
+    errors: allErrors,
+    isValid: allErrors.length === 0 && allWarnings.filter(w => w.severity === 'error').length === 0,
+    canProceed: allErrors.length === 0
+  };
+
+  console.log('🔍 FINAL VALIDATION RESULT:', validation);
+
   db.close();
 
   const model: DataModel = {
@@ -370,7 +508,7 @@ export const processGpkgFile = async (file: File): Promise<{ model: DataModel; s
     bbox: globalBbox,
   };
 
-  return { model, summary };
+  return { model, summary, validation };
 };
 
 // ============================================================
@@ -380,13 +518,15 @@ export const processGpkgFile = async (file: File): Promise<{ model: DataModel; s
 
 export const processAnyFile = async (
   files: File | File[]
-): Promise<{ model: DataModel; summary: InferredDataSummary }> => {
+): Promise<{ model: DataModel; summary: InferredDataSummary; validation: ImportValidationResult }> => {
+  console.log('🔍 processAnyFile CALLED with files:', files);
   const fileArray = Array.isArray(files) ? files : [files];
   const mainFile = fileArray[0];
   const ext = mainFile.name.split('.').pop()?.toLowerCase() || '';
 
   // Try GDAL first (handles all formats)
   try {
+    console.log('🔍 Trying GDAL import...');
     const { processFilesWithGdal } = await import('./gdalService');
     return await processFilesWithGdal(fileArray);
   } catch (gdalErr) {
@@ -395,6 +535,7 @@ export const processAnyFile = async (
 
   // Fallback: GeoPackage via sql.js
   if (ext === 'gpkg') {
+    console.log('🔍 Using processGpkgFile fallback...');
     return processGpkgFile(mainFile);
   }
 

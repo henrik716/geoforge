@@ -170,3 +170,26 @@ export interface LayerSourceMapping {
   timestampColumn?: string;               // for update detection (optional — without it, only inserts/deletes are tracked)
   primaryKeyColumn: string;               // column that uniquely identifies each row (default: 'fid')
 }
+
+export interface ImportWarning {
+  type: 'no_primary_key' | 'non_integer_pk' | 'null_pk' | 'non_unique_pk';
+  layerName: string;
+  columnName?: string;
+  message: string;
+  suggestion: string;
+  severity: 'warning' | 'error';
+}
+
+export interface ImportError {
+  type: 'critical';
+  layerName: string;
+  message: string;
+  details: string;
+}
+
+export interface ImportValidationResult {
+  warnings: ImportWarning[];
+  errors: ImportError[];
+  isValid: boolean;
+  canProceed: boolean;
+}

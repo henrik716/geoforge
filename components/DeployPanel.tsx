@@ -7,16 +7,18 @@ import {
 } from 'lucide-react';
 import {
   DataModel, SourceConnection, SourceType, DeployTarget,
-  PostgresConfig, SupabaseConfig, DatabricksConfig, GeopackageConfig, LayerSourceMapping
+  PostgresConfig, SupabaseConfig, DatabricksConfig, GeopackageConfig, LayerSourceMapping, ImportValidationResult
 } from '../types';
 import { generateDeployFiles, generatePygeoapiConfig, exportDeployKit } from '../utils/deployUtils';
 import { pushDeployKit, checkRepoAccess, DeployPushResult } from '../utils/githubService';
+import ImportWarnings from './ImportWarnings';
 
 interface DeployPanelProps {
   model: DataModel;
   t: any;
   lang: string;
   onSourceChange?: (source: SourceConnection) => void;
+  validation?: ImportValidationResult;
 }
 
 // ============================================================
@@ -88,7 +90,7 @@ const Field: React.FC<{
 // ============================================================
 // Main DeployPanel Component
 // ============================================================
-const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChange }) => {
+const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChange, validation }) => {
   const d = t.deploy; 
   const [step, setStep] = useState(0);
   const [sourceType, setSourceType] = useState<SourceType | null>(null);
@@ -270,6 +272,17 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
           );
         })}
       </div>
+
+      {/* Validation warnings */}
+      {validation && validation.warnings.length > 0 && (
+        <ImportWarnings
+          validation={validation}
+          onProceed={() => {/* User can proceed despite warnings */}}
+          onFixIssues={() => {/* User can go back to fix issues */}}
+          t={t}
+          lang={lang}
+        />
+      )}
 
       {/* STEP 0: SOURCE SELECTION */}
       {step === 0 && (
