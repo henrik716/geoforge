@@ -547,19 +547,26 @@ export const processFilesWithGdal = async (
   for (const layerSummary of result.summary.layers) {
     console.log('🔍 GDAL VALIDATION - layer:', layerSummary.tableName, 'pk:', layerSummary.primaryKeyColumn);
     
-    // Check if layer has a proper primary key
-    const hasIdField = layerSummary.primaryKeyColumn && layerSummary.primaryKeyColumn !== 'fid';
+    // Find the corresponding model layer to check properties (like DeployPanel does)
+    const modelLayer = result.model.layers.find(l => l.name === layerSummary.tableName);
+    
+    // Check if layer has a proper ID field in properties (same logic as DeployPanel)
+    const hasIdField = modelLayer?.properties.some(p => 
+      p.name.toLowerCase() === 'id' || p.name.toLowerCase() === 'fid'
+    );
     
     if (!hasIdField) {
-      console.log('🔍 GDAL VALIDATION - MISSING PK for:', layerSummary.tableName);
+      console.log('🔍 GDAL VALIDATION - MISSING ID FIELD for:', layerSummary.tableName);
       warnings.push({
         type: 'no_primary_key',
         layerName: layerSummary.tableName,
-        columnName: layerSummary.primaryKeyColumn || 'fid',
-        message: `Table '${layerSummary.tableName}' has no proper primary key column.`,
+        columnName: 'none',
+        message: `Layer '${layerSummary.tableName}' has no ID field (id or fid).`,
         suggestion: "Add an INTEGER PRIMARY KEY column (e.g., 'id' or 'fid')",
         severity: 'error'
       });
+    } else {
+      console.log('🔍 GDAL VALIDATION - ID field found for:', layerSummary.tableName);
     }
   }
 
