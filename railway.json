@@ -1,1 +1,1 @@
-{"build": {"builder": "NIXPACKS", "buildCommand": "npm ci", "nodeVersion": "20.19.0"}, "deploy": {"startCommand": "npm run build && serve -s dist -p 5000", "healthcheckPath": "/", "healthcheckTimeout": 100, "restartPolicyType": "ON_FAILURE", "restartPolicyMaxRetries": 10}}
+{"build": {"builder": "DOCKERFILE"}, "deploy": {"healthcheckPath": "/", "healthcheckTimeout": 100, "restartPolicyType": "ON_FAILURE", "restartPolicyMaxRetries": 10}}
