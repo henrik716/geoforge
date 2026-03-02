@@ -367,8 +367,11 @@ export const generateQgisProject = (
       const markerName = qMarkerName[layer.style.pointIcon || 'circle'] || 'circle';
 
       // Map UI hatchStyle values → QGIS SimpleFill style values
-      // The UI values (horizontal, vertical, cross, b_diagonal, f_diagonal, diagonal_x)
-      // match QGIS SimpleFill style values directly — no translation needed.
+      // When custom hatching properties are set, use LinePatternFill for precise control
+      const hasCustomHatching = layer.style.hatchStyle && 
+        layer.style.hatchStyle !== 'solid' && 
+        (layer.style.hatchSpacing !== undefined || 
+         layer.style.hatchThickness !== undefined);
       const fillStyle = (layer.style.hatchStyle && layer.style.hatchStyle !== 'solid')
         ? layer.style.hatchStyle
         : 'solid';
@@ -397,38 +400,116 @@ export const generateQgisProject = (
           </layer>
         </symbol>`;
       } else {
-        // Polygon: use SimpleFill with style for hatching, plus outline
-        symbolXml = `<symbol alpha="${opacity}" type="fill" name="0">
-          <layer class="SimpleFill">
-            <prop k="color" v="${qColor}"/>
-            <prop k="style" v="${fillStyle}"/>
-            <prop k="outline_color" v="${qOutlineColor}"/>
-            <prop k="outline_width" v="${lineWidth}"/>
-            <prop k="outline_width_unit" v="Point"/>
-            <prop k="outline_style" v="${lineStyle}"/>
-            <prop k="joinstyle" v="miter"/>
-          </layer>
-        </symbol>`;
+        // Map hatch styles to angles (in degrees)
+        const hatchAngles: Record<string, number> = {
+          horizontal: 0,
+          vertical: 90,
+          b_diagonal: 45,  // Back diagonal (\)
+          f_diagonal: -45, // Forward diagonal (/)
+        };
+
+        if (hasCustomHatching && hatchAngles[layer.style.hatchStyle!]) {
+          // Use LinePatternFill for precise control when custom properties are set
+          const angle = hatchAngles[layer.style.hatchStyle!];
+          const distance = layer.style.hatchSpacing || 6;
+          const lineWidth = layer.style.hatchThickness || 1;
+
+          // For cross and diagonal_x patterns, we need multiple layers
+          if (layer.style.hatchStyle === 'cross') {
+            symbolXml = `<symbol alpha="${opacity}" type="fill" name="0">
+              <layer class="LinePatternFill">
+                <prop k="color" v="${qColor}"/>
+                <prop k="angle" v="0"/>
+                <prop k="distance" v="${distance}"/>
+                <prop k="line_width" v="${lineWidth}"/>
+                <prop k="line_width_unit" v="Point"/>
+                <prop k="outline_color" v="${qOutlineColor}"/>
+                <prop k="outline_width" v="${lineWidth}"/>
+                <prop k="outline_width_unit" v="Point"/>
+                <prop k="outline_style" v="${lineStyle}"/>
+                <prop k="joinstyle" v="miter"/>
+              </layer>
+              <layer class="LinePatternFill">
+                <prop k="color" v="${qColor}"/>
+                <prop k="angle" v="90"/>
+                <prop k="distance" v="${distance}"/>
+                <prop k="line_width" v="${lineWidth}"/>
+                <prop k="line_width_unit" v="Point"/>
+              </layer>
+            </symbol>`;
+          } else if (layer.style.hatchStyle === 'diagonal_x') {
+            symbolXml = `<symbol alpha="${opacity}" type="fill" name="0">
+              <layer class="LinePatternFill">
+                <prop k="color" v="${qColor}"/>
+                <prop k="angle" v="45"/>
+                <prop k="distance" v="${distance}"/>
+                <prop k="line_width" v="${lineWidth}"/>
+                <prop k="line_width_unit" v="Point"/>
+                <prop k="outline_color" v="${qOutlineColor}"/>
+                <prop k="outline_width" v="${lineWidth}"/>
+                <prop k="outline_width_unit" v="Point"/>
+                <prop k="outline_style" v="${lineStyle}"/>
+                <prop k="joinstyle" v="miter"/>
+              </layer>
+              <layer class="LinePatternFill">
+                <prop k="color" v="${qColor}"/>
+                <prop k="angle" v="-45"/>
+                <prop k="distance" v="${distance}"/>
+                <prop k="line_width" v="${lineWidth}"/>
+                <prop k="line_width_unit" v="Point"/>
+              </layer>
+            </symbol>`;
+          } else {
+            // Single pattern (horizontal, vertical, b_diagonal, f_diagonal)
+            symbolXml = `<symbol alpha="${opacity}" type="fill" name="0">
+              <layer class="LinePatternFill">
+                <prop k="color" v="${qColor}"/>
+                <prop k="angle" v="${angle}"/>
+                <prop k="distance" v="${distance}"/>
+                <prop k="line_width" v="${lineWidth}"/>
+                <prop k="line_width_unit" v="Point"/>
+                <prop k="outline_color" v="${qOutlineColor}"/>
+                <prop k="outline_width" v="${lineWidth}"/>
+                <prop k="outline_width_unit" v="Point"/>
+                <prop k="outline_style" v="${lineStyle}"/>
+                <prop k="joinstyle" v="miter"/>
+              </layer>
+            </symbol>`;
+          }
+        } else {
+          // Use SimpleFill for basic hatching or solid fills
+          symbolXml = `<symbol alpha="${opacity}" type="fill" name="0">
+            <layer class="SimpleFill">
+              <prop k="color" v="${qColor}"/>
+              <prop k="style" v="${fillStyle}"/>
+              <prop k="outline_color" v="${qOutlineColor}"/>
+              <prop k="outline_width" v="${lineWidth}"/>
+              <prop k="outline_width_unit" v="Point"/>
+              <prop k="outline_style" v="${lineStyle}"/>
+              <prop k="joinstyle" v="miter"/>
+            </layer>
+          </symbol>`;
+        }
       }
 
       const layerId = `${tbl}_${index}_${Date.now()}`;
 
       mapLayers.push(`    <maplayer name="${layer.name}" type="vector" hasScaleBasedVisibilityFlag="0">
-      <id>${layerId}</id>
-      <datasource>${datasource}</datasource>
-      <provider encoding="UTF-8">${providerKey}</provider>
-      <layername>${layer.name}</layername>
-      <shortname>${sourceTable}</shortname>
-      <title>${layer.name}</title>
-      <crs>
-        ${buildSpatialRefSys(authid)}
-      </crs>
-      <renderer-v2 type="singleSymbol" enableorderby="0" forceraster="0">
-        <symbols>
-          ${symbolXml}
-        </symbols>
-      </renderer-v2>
-    </maplayer>`);
+        <id>${layerId}</id>
+        <datasource>${datasource}</datasource>
+        <provider encoding="UTF-8">${providerKey}</provider>
+        <layername>${layer.name}</layername>
+        <shortname>${sourceTable}</shortname>
+        <title>${layer.name}</title>
+        <crs>
+          ${buildSpatialRefSys(authid)}
+        </crs>
+        <renderer-v2 type="singleSymbol" enableorderby="0" forceraster="0">
+          <symbols>
+            ${symbolXml}
+          </symbols>
+        </renderer-v2>
+      </maplayer>`);
 
       treeLayers.push(`    <layer-tree-layer id="${layerId}" name="${layer.name}" providerKey="${providerKey}" checked="Qt::Checked" expanded="1"/>`);
     });

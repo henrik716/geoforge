@@ -156,6 +156,24 @@ const LayerStyleEditor: React.FC<LayerStyleEditorProps> = ({
                       {Object.entries(st.hatches || {}).map(([k, v]) => <option key={k} value={k}>{v as string}</option>)}
                     </select>
                   </div>
+                  {(style.hatchStyle && style.hatchStyle !== 'solid') && (
+                    <>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-end">
+                          <label className={`text-[10px] font-black uppercase tracking-widest ${cls.label}`}>{st.hatchSpacing || 'Spacing'}</label>
+                          <span className={`text-xs font-black ${cls.badge} px-2 py-0.5 rounded-md`}>{style.hatchSpacing || 6}px</span>
+                        </div>
+                        <input type="range" min="2" max="20" value={style.hatchSpacing || 6} onChange={e => onUpdate({ hatchSpacing: parseInt(e.target.value) })} className={`w-full h-2 ${cls.slider} rounded-full appearance-none cursor-pointer accent-indigo-500`} />
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-end">
+                          <label className={`text-[10px] font-black uppercase tracking-widest ${cls.label}`}>{st.hatchThickness || 'Thickness'}</label>
+                          <span className={`text-xs font-black ${cls.badge} px-2 py-0.5 rounded-md`}>{style.hatchThickness || 1}px</span>
+                        </div>
+                        <input type="range" min="0.5" max="5" step="0.5" value={style.hatchThickness || 1} onChange={e => onUpdate({ hatchThickness: parseFloat(e.target.value) })} className={`w-full h-2 ${cls.slider} rounded-full appearance-none cursor-pointer accent-indigo-500`} />
+                      </div>
+                                          </>
+                  )}
                 </>
               )}
             </div>
