@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, Trash2, Layers, LayoutList, MapPin, Globe, Palette, MousePointer2, 
-  GitCommit, Square, MoreHorizontal, Hash, Shapes, Maximize2, Zap, Info,
-  ChevronDown, ChevronUp, Package, Edit3, Eye, PlusCircle, Edit2, MinusCircle, ArrowRight, ShieldCheck, Box,
-  Database, FileText, X // Database-ikonet for 'None' geometri
+import {
+  Plus, Trash2, Layers, LayoutList, MapPin, Globe, Palette, MousePointer2,
+  GitCommit, Square, Hash, Shapes, Package,
+  ChevronDown, ChevronUp, Edit3, Eye, Box,
+  Database
 } from 'lucide-react';
-import { DataModel, Layer, ModelProperty, GeometryType, SharedType, ModelMetadata } from '../types';
+import { DataModel, Layer, ModelProperty, GeometryType, SharedType } from '../types';
 import { createEmptyProperty, createEmptyLayer, COLORS } from '../constants';
-import { compareModels, ModelChange, generateChangelog, getStructuredChanges } from '../utils/diffUtils';
+import { compareModels, getStructuredChanges } from '../utils/diffUtils';
 import { fetchModelHistory, fetchModelAtCommit, CommitInfo } from '../utils/githubService';
 import PropertyEditor from './PropertyEditor';
 import StylePreview from './StylePreview';
 import LayerStyleEditor from './LayerStyleEditor';
-import { ChangeRow } from './ChangeRow'; 
+import ChangeReviewBar from './editor/ChangeReviewBar';
+import MetadataSection from './editor/MetadataSection';
+import LayerConstraintsSection from './editor/LayerConstraintsSection';
+import SharedTypesTab from './editor/SharedTypesTab'; 
 
 interface ModelEditorProps {
   model: DataModel;
@@ -285,68 +288,7 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
   return (
     <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 lg:p-12 w-full custom-scrollbar scroll-smooth">
       {reviewMode && changes.length > 0 && structuredChanges && (
-        <div className="mb-8 bg-slate-900 rounded-[32px] overflow-hidden border border-slate-800 shadow-2xl animate-in slide-in-from-top-4 duration-500">
-           <div className="px-8 py-6 border-b border-slate-800 flex flex-col gap-6 bg-slate-800/30">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                   <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center text-indigo-400 border border-indigo-500/20">
-                     <GitCommit size={20} />
-                   </div>
-                   <div>
-                     <h4 className="text-sm font-black text-slate-100 uppercase tracking-widest">{t.review.reviewingChanges}</h4>
-                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{stats.total} {t.review.totalOperations}</p>
-                   </div>
-                </div>
-                <div className="flex items-center gap-4">
-                   <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest">
-                      <span className="flex items-center gap-1.5 text-emerald-400"><PlusCircle size={12}/> {stats.added}</span>
-                      <span className="flex items-center gap-1.5 text-amber-400"><Edit2 size={12}/> {stats.modified}</span>
-                      <span className="flex items-center gap-1.5 text-rose-400"><MinusCircle size={12}/> {stats.deleted}</span>
-                   </div>
-                </div>
-              </div>
-
-              {/* Stat Bar */}
-              <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden flex">
-                <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${(stats.added / stats.total) * 100}%` }} />
-                <div className="h-full bg-amber-500 transition-all duration-500" style={{ width: `${(stats.modified / stats.total) * 100}%` }} />
-                <div className="h-full bg-rose-500 transition-all duration-500" style={{ width: `${(stats.deleted / stats.total) * 100}%` }} />
-              </div>
-           </div>
-
-           <div className="p-8 space-y-8">
-              {/* Model Metadata Section */}
-              {structuredChanges.modelMeta.length > 0 && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
-                    <Package size={14} /> {t.review.modelMetadata}
-                  </div>
-                  <div className="space-y-2">
-                    {structuredChanges.modelMeta.map((change, idx) => (
-                      <ChangeRow key={`meta-${idx}`} change={change} t={t} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Layers Sections */}
-              {structuredChanges.layers.map((layerGroup) => (
-                <div key={layerGroup.layerId} className="space-y-4">
-                  <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
-                    <Layers size={14} /> {t.review.layer}: {layerGroup.layerName}
-                  </div>
-                  <div className="space-y-2">
-                    {layerGroup.layerChanges.map((change, idx) => (
-                      <ChangeRow key={`layer-${layerGroup.layerId}-${idx}`} change={change} t={t} />
-                    ))}
-                    {layerGroup.propertyChanges.map((change, idx) => (
-                      <ChangeRow key={`prop-${layerGroup.layerId}-${idx}`} change={change} isProperty t={t} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-           </div>
-        </div>
+        <ChangeReviewBar changes={changes} structuredChanges={structuredChanges} stats={stats} t={t} />
       )}
 
       {/* --- TOP TABS (LAYERS VS TYPES) --- */}
@@ -473,208 +415,7 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
             </div>
           </section>
 
-          {/* METADATA SECTION (collapsible) */}
-          <section className="bg-white rounded-[24px] md:rounded-[32px] border border-slate-200 shadow-sm mb-6 md:mb-10 overflow-hidden transition-all">
-            <button
-              onClick={() => setIsMetadataOpen(!isMetadataOpen)}
-              className="w-full flex items-center justify-between p-5 md:p-8 hover:bg-slate-50 transition-colors"
-            >
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center text-teal-600 border border-teal-100 shrink-0">
-                  <FileText size={20} />
-                </div>
-                <div className="text-left">
-                  <span className="text-sm font-black text-slate-800 block">{t.metadata?.sectionTitle || 'Publishing metadata'}</span>
-                  <span className="text-[10px] text-slate-400 font-medium">{t.metadata?.sectionHint || ''}</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {model.metadata?.contactOrganization && (
-                  <span className="hidden sm:block text-[9px] bg-teal-100 text-teal-700 px-2 py-1 rounded-lg font-black uppercase tracking-tighter">
-                    {model.metadata.contactOrganization}
-                  </span>
-                )}
-                {isMetadataOpen ? <ChevronUp size={20} className="text-slate-300" /> : <ChevronDown size={20} className="text-slate-300" />}
-              </div>
-            </button>
-
-            {isMetadataOpen && (() => {
-              const md = t.metadata || {};
-              const meta: ModelMetadata = model.metadata || {
-                contactName: '', contactEmail: '', contactOrganization: '',
-                keywords: [], theme: '', license: 'CC-BY-4.0',
-                accessRights: 'public', purpose: '', accrualPeriodicity: 'unknown',
-                spatialExtent: { westBoundLongitude: '', eastBoundLongitude: '', southBoundLatitude: '', northBoundLatitude: '' },
-                temporalExtentFrom: '', temporalExtentTo: '',
-              };
-              const updateMeta = (patch: Partial<ModelMetadata>) => {
-                onUpdate({ ...model, metadata: { ...meta, ...patch } });
-              };
-              const keywordInput = React.createRef<HTMLInputElement>();
-
-              return (
-                <div className="px-5 md:px-8 pb-6 md:pb-8 space-y-6 border-t border-slate-100 animate-in fade-in slide-in-from-top-2 duration-300">
-                  
-                  {/* Contact */}
-                  <div className="pt-6 space-y-4">
-                    <h4 className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{lang === 'no' ? 'Kontaktinformasjon' : 'Contact information'}</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div>
-                        <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.contactName}</label>
-                        <input type="text" value={meta.contactName} onChange={e => updateMeta({ contactName: e.target.value })} placeholder={md.contactNamePlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.contactEmail}</label>
-                        <input type="email" value={meta.contactEmail} onChange={e => updateMeta({ contactEmail: e.target.value })} placeholder={md.contactEmailPlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.contactOrganization}</label>
-                        <input type="text" value={meta.contactOrganization} onChange={e => updateMeta({ contactOrganization: e.target.value })} placeholder={md.contactOrganizationPlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Dataset URLs */}
-                  <div className="pt-6 space-y-4">
-                    <h4 className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{lang === 'no' ? 'Dataset-informasjon' : 'Dataset Information'}</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.datasetUrl}</label>
-                        <input 
-                          type="url" 
-                          value={meta.url || ''} 
-                          onChange={e => updateMeta({ url: e.target.value })} 
-                          placeholder={md.datasetUrlPlaceholder}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" 
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.termsOfService}</label>
-                        <input 
-                          type="url" 
-                          value={meta.termsOfService || ''} 
-                          onChange={e => updateMeta({ termsOfService: e.target.value })} 
-                          placeholder={md.termsOfServicePlaceholder}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" 
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Keywords */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{md.keywords}</label>
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      {(meta.keywords || []).map((kw, i) => (
-                        <span key={i} className="inline-flex items-center gap-1.5 bg-teal-50 text-teal-700 border border-teal-200 px-3 py-1.5 rounded-xl text-xs font-bold">
-                          {kw}
-                          <button onClick={() => updateMeta({ keywords: meta.keywords.filter((_, idx) => idx !== i) })} className="text-teal-400 hover:text-teal-700 transition-colors"><X size={14} /></button>
-                        </span>
-                      ))}
-                    </div>
-                    <input
-                      ref={keywordInput}
-                      type="text"
-                      placeholder={md.keywordsPlaceholder}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all"
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && (e.target as HTMLInputElement).value.trim()) {
-                          e.preventDefault();
-                          const val = (e.target as HTMLInputElement).value.trim();
-                          if (!meta.keywords.includes(val)) {
-                            updateMeta({ keywords: [...(meta.keywords || []), val] });
-                          }
-                          (e.target as HTMLInputElement).value = '';
-                        }
-                      }}
-                    />
-                  </div>
-
-                  {/* Classification row */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.theme}</label>
-                      <select value={meta.theme} onChange={e => updateMeta({ theme: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold appearance-none focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all cursor-pointer">
-                        <option value="">—</option>
-                        {Object.entries(md.themes || {}).map(([key, label]) => (
-                          <option key={key} value={key}>{label as string}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.license}</label>
-                      <select value={meta.license} onChange={e => updateMeta({ license: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold appearance-none focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all cursor-pointer">
-                        {Object.entries(md.licenses || {}).map(([key, label]) => (
-                          <option key={key} value={key}>{label as string}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.accessRights}</label>
-                      <select value={meta.accessRights} onChange={e => updateMeta({ accessRights: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold appearance-none focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all cursor-pointer">
-                        {Object.entries(md.accessRightsOptions || {}).map(([key, label]) => (
-                          <option key={key} value={key}>{label as string}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Purpose */}
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.purpose}</label>
-                    <textarea value={meta.purpose} onChange={e => updateMeta({ purpose: e.target.value })} placeholder={md.purposePlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-xs md:text-sm min-h-[60px] focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all resize-none leading-relaxed" />
-                  </div>
-
-                  {/* Frequency */}
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.accrualPeriodicity}</label>
-                    <select value={meta.accrualPeriodicity} onChange={e => updateMeta({ accrualPeriodicity: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold appearance-none focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all cursor-pointer">
-                      {Object.entries(md.frequencies || {}).map(([key, label]) => (
-                        <option key={key} value={key}>{label as string}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Spatial extent (bbox) */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{md.spatialExtent}</label>
-                    <div className="grid grid-cols-4 gap-3">
-                      {[
-                        { key: 'westBoundLongitude', label: md.west },
-                        { key: 'southBoundLatitude', label: md.south },
-                        { key: 'eastBoundLongitude', label: md.east },
-                        { key: 'northBoundLatitude', label: md.north },
-                      ].map(({ key, label }) => (
-                        <div key={key}>
-                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">{label}</span>
-                          <input
-                            type="text"
-                            value={(meta.spatialExtent as any)?.[key] || ''}
-                            onChange={e => updateMeta({ spatialExtent: { ...meta.spatialExtent, [key]: e.target.value } })}
-                            placeholder="0.0"
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Temporal extent */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.temporalFrom}</label>
-                      <input type="date" value={meta.temporalExtentFrom} onChange={e => updateMeta({ temporalExtentFrom: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.temporalTo}</label>
-                      <input type="date" value={meta.temporalExtentTo} onChange={e => updateMeta({ temporalExtentTo: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all" />
-                    </div>
-                  </div>
-
-                </div>
-              );
-            })()}
-          </section>
+          <MetadataSection model={model} onUpdate={onUpdate} isOpen={isMetadataOpen} onToggle={() => setIsMetadataOpen(!isMetadataOpen)} t={t} lang={lang} />
 
           <section className="mb-6 md:mb-8 pb-2">
             <div className="flex items-center justify-between mb-4 px-2">
@@ -867,237 +608,26 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
                   )}
               </div>
               
-              {/* --- ADVANCED VALIDATION (CROSS-FIELD CONSTRAINTS) --- */}
-              <div className="mt-8 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
-                <div className="px-5 py-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-                  <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
-                    <ShieldCheck size={16} className="text-emerald-500" />
-                    {t.layerValidation?.title || 'Advanced Validation'}
-                  </h3>
-                </div>
-                
-                <div className="p-5 space-y-4">
-                  {(!activeLayer.layerConstraints || activeLayer.layerConstraints.length === 0) ? (
-                    <div className="text-center py-6 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                      <p className="text-sm text-slate-500 mb-3">{t.layerValidation?.noRules || 'No rules defined'}</p>
-                      <button
-                        onClick={() => handleUpdateLayer({
-                          layerConstraints: [{
-                            id: Math.random().toString(36).substring(2, 9),
-                            type: 'compare',
-                            fieldA: activeLayer.properties[0]?.name || '',
-                            operator: '>',
-                            fieldB: activeLayer.properties.length > 1 ? activeLayer.properties[1]?.name : (activeLayer.properties[0]?.name || ''),
-                            errorMessage: ''
-                          }]
-                        })}
-                        className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-700 hover:border-emerald-500 hover:text-emerald-600 transition-colors shadow-sm"
-                      >
-                        + {t.layerValidation?.addRule || 'Add Rule'}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {activeLayer.layerConstraints.map((constraint, index) => (
-                        <div key={constraint.id} className="flex flex-wrap items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 relative group">
-                          
-                          {/* Field A */}
-                          <div className="flex-1 min-w-[120px]">
-                            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">{t.layerValidation?.field1 || 'Field 1'}</label>
-                            <select
-                              value={constraint.fieldA}
-                              onChange={(e) => {
-                                const newConstraints = [...activeLayer.layerConstraints!];
-                                newConstraints[index] = { ...constraint, fieldA: e.target.value };
-                                handleUpdateLayer({ layerConstraints: newConstraints });
-                              }}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                            >
-                              <option value="">-- {t.styling?.selectProperty || 'Select'} --</option>
-                              {activeLayer.properties.map(p => (
-                                <option key={p.id} value={p.name}>{p.name}</option>
-                              ))}
-                            </select>
-                          </div>
-
-                          {/* Operator */}
-                          <div className="w-24 shrink-0">
-                            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">{t.layerValidation?.operator || 'Operator'}</label>
-                            <select
-                              value={constraint.operator}
-                              onChange={(e) => {
-                                const newConstraints = [...activeLayer.layerConstraints!];
-                                newConstraints[index] = { ...constraint, operator: e.target.value as any };
-                                handleUpdateLayer({ layerConstraints: newConstraints });
-                              }}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-black text-slate-700 text-center focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 mono"
-                            >
-                              <option value=">">&gt;</option>
-                              <option value="<">&lt;</option>
-                              <option value=">=">&ge;</option>
-                              <option value="<=">&le;</option>
-                              <option value="==">==</option>
-                              <option value="!=">!=</option>
-                            </select>
-                          </div>
-
-                          {/* Field B */}
-                          <div className="flex-1 min-w-[120px]">
-                            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">{t.layerValidation?.field2 || 'Field 2'}</label>
-                            <select
-                              value={constraint.fieldB}
-                              onChange={(e) => {
-                                const newConstraints = [...activeLayer.layerConstraints!];
-                                newConstraints[index] = { ...constraint, fieldB: e.target.value };
-                                handleUpdateLayer({ layerConstraints: newConstraints });
-                              }}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                            >
-                              <option value="">-- {t.styling?.selectProperty || 'Select'} --</option>
-                              {activeLayer.properties.map(p => (
-                                <option key={p.id} value={p.name}>{p.name}</option>
-                              ))}
-                            </select>
-                          </div>
-
-                          {/* Custom Error Message */}
-                          <div className="w-full sm:flex-1 min-w-[200px]">
-                            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">{t.layerValidation?.errorMessage || 'Error Message'}</label>
-                            <input
-                              type="text"
-                              value={constraint.errorMessage || ''}
-                              onChange={(e) => {
-                                const newConstraints = [...activeLayer.layerConstraints!];
-                                newConstraints[index] = { ...constraint, errorMessage: e.target.value };
-                                handleUpdateLayer({ layerConstraints: newConstraints });
-                              }}
-                              placeholder={t.layerValidation?.errorMessagePlaceholder || 'Message...'}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 placeholder-slate-400 italic"
-                            />
-                          </div>
-
-                          {/* Delete Rule Button */}
-                          <div className="pt-5 shrink-0">
-                            <button
-                              onClick={() => {
-                                const newConstraints = activeLayer.layerConstraints!.filter(c => c.id !== constraint.id);
-                                handleUpdateLayer({ layerConstraints: newConstraints });
-                              }}
-                              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                              title={t.layerValidation?.deleteRule || 'Delete'}
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                          </div>
-                          
-                        </div>
-                      ))}
-                      
-                      {/* Add Another Rule Button */}
-                      <button
-                        onClick={() => {
-                          const newConstraints = [...(activeLayer.layerConstraints || []), {
-                            id: Math.random().toString(36).substring(2, 9),
-                            type: 'compare',
-                            fieldA: activeLayer.properties[0]?.name || '',
-                            operator: '>',
-                            fieldB: activeLayer.properties.length > 1 ? activeLayer.properties[1]?.name : (activeLayer.properties[0]?.name || ''),
-                            errorMessage: ''
-                          }];
-                          handleUpdateLayer({ layerConstraints: newConstraints as any });
-                        }}
-                        className="mt-4 px-3 py-1.5 text-sm font-bold text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-md transition-colors flex items-center gap-1"
-                      >
-                        <Plus size={14} /> {t.layerValidation?.addRule || 'Add Rule'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              {/* --- END ADVANCED VALIDATION --- */}
+              <LayerConstraintsSection layer={activeLayer} onUpdateLayer={handleUpdateLayer} t={t} />
             </section>
           )}
         </>
       ) : (
-        /* --- SHARED TYPES EDITOR TAB --- */
-        <section className="space-y-6 md:space-y-8 animate-in fade-in duration-300 pb-24">
-          <div className="flex items-center justify-between mb-4 px-2">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">{t.sharedTypes || 'Datatyper'}</h3>
-            <button onClick={handleAddSharedType} className="text-xs font-black text-indigo-600 hover:underline flex items-center gap-1.5 shrink-0"><Plus size={14}/> {t.addSharedType || 'Ny datatype'}</button>
-          </div>
-          
-          <div className="flex flex-wrap gap-2 md:gap-3 px-1 pb-4">
-            {sharedTypes.map(st => (
-              <button 
-                key={st.id} 
-                onClick={() => setActiveSharedTypeId(st.id)} 
-                className={`
-                  px-4 py-3 md:px-6 md:py-3.5 rounded-[16px] md:rounded-[20px] text-xs md:text-sm font-black transition-all border flex items-center gap-2 md:gap-3 whitespace-nowrap shrink-0 relative
-                  ${activeSharedTypeId === st.id ? 'bg-fuchsia-600 border-fuchsia-600 text-white shadow-xl shadow-fuchsia-200' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:shadow-md'}
-                `}
-              >
-                <div className="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
-                  <Box size={14} className={activeSharedTypeId === st.id ? 'text-white' : 'text-slate-400'} />
-                </div>
-                {st.name || "Untitled Type"}
-              </button>
-            ))}
-            {sharedTypes.length === 0 && (
-               <div className="text-xs text-slate-400 italic py-3 px-4">Ingen datatyper opprettet ennå.</div>
-            )}
-          </div>
-
-          {activeSharedType && (
-            <div className="bg-white rounded-[24px] md:rounded-[32px] border border-slate-200 shadow-sm p-4 sm:p-6 md:p-8">
-              <div className="flex items-center justify-between mb-5 md:mb-6">
-                <div className="flex-1 relative group/typename">
-                  <div className="flex items-center gap-2 group">
-                    <div className="relative flex-1">
-                        <label className="text-[10px] md:text-[11px] font-black uppercase tracking-[0.15em] text-slate-400 block mb-2">{t.sharedTypeName || 'Type Name'}</label>
-                        <input type="text" value={activeSharedType.name} onChange={e => handleUpdateSharedType({ name: e.target.value })} className={`w-full bg-slate-50 border-2 border-slate-100 hover:border-fuchsia-200 text-lg sm:text-xl md:text-2xl font-black px-4 py-3 rounded-2xl focus:bg-white focus:border-fuchsia-500 focus:ring-4 focus:ring-fuchsia-500/5 outline-none placeholder:text-slate-200 transition-all`} placeholder="f.eks. Adresse" />
-                    </div>
-                  </div>
-                </div>
-                <button onClick={() => handleDeleteSharedType(activeSharedType.id)} className="ml-3 sm:ml-4 p-3 rounded-xl text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-all self-end"><Trash2 size={20} /></button>
-              </div>
-
-              <textarea 
-                placeholder={t.sharedTypeDescriptionPlaceholder} 
-                value={activeSharedType.description} 
-                onChange={e => handleUpdateSharedType({ description: e.target.value })} 
-                className="w-full bg-slate-50 border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-4 md:px-5 md:py-4 text-xs md:text-sm min-h-[60px] md:min-h-[80px] focus:ring-4 focus:ring-fuchsia-500/10 focus:border-fuchsia-500 outline-none transition-all resize-none leading-relaxed mb-8" 
-              />
-
-              <div className="space-y-4 md:space-y-6">
-                <div className="flex items-center justify-between mb-2 px-2">
-                  <div className="flex items-center gap-2 md:gap-3">
-                    <h2 className="text-base md:text-lg font-black text-slate-800 tracking-tight">{t.properties} i {activeSharedType.name}</h2>
-                    <span className="bg-slate-100 text-slate-500 text-[10px] md:text-xs font-black px-3 py-1 rounded-full border border-slate-200 shadow-inner">{activeSharedType.properties.length}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-3 md:space-y-5">
-                  {activeSharedType.properties.map((prop, idx) => (
-                    <PropertyEditor 
-                      key={prop.id} 
-                      prop={prop} 
-                      onUpdate={handleUpdateSharedProperty} 
-                      onDelete={handleDeleteSharedProperty} 
-                      onMove={(dir) => handleMoveSharedProperty(prop.id, dir)} 
-                      isFirst={idx === 0} 
-                      isLast={idx === activeSharedType.properties.length - 1} 
-                      t={t} 
-                      allLayers={model.layers.map(l => ({ id: l.id, name: l.name }))}
-                      sharedTypes={sharedTypes.filter(st => st.id !== activeSharedType.id)} // Prevent self-referencing
-                    />
-                  ))}
-                  <button onClick={handleAddSharedProperty} className="w-full py-6 md:py-8 border-2 border-dashed border-slate-200 rounded-[18px] md:rounded-[24px] text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] hover:border-fuchsia-300 hover:text-fuchsia-600 hover:bg-fuchsia-50/50 transition-all flex items-center justify-center gap-3 active:scale-[0.99]"><Plus size={18} />{t.addProperty}</button>
-                </div>
-              </div>
-
-            </div>
-          )}
-        </section>
+        <SharedTypesTab
+          model={model}
+          sharedTypes={sharedTypes}
+          activeSharedType={activeSharedType}
+          activeSharedTypeId={activeSharedTypeId}
+          onSelectSharedType={setActiveSharedTypeId}
+          onAddSharedType={handleAddSharedType}
+          onDeleteSharedType={handleDeleteSharedType}
+          onUpdateSharedType={handleUpdateSharedType}
+          onAddProperty={handleAddSharedProperty}
+          onUpdateProperty={handleUpdateSharedProperty}
+          onDeleteProperty={handleDeleteSharedProperty}
+          onMoveProperty={handleMoveSharedProperty}
+          t={t}
+        />
       )}
     </div>
   );

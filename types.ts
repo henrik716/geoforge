@@ -7,7 +7,6 @@ export interface CodeValue {
   description?: string;
 }
 
-// 1. Lagt til 'object' og 'array' her:
 export type PropertyType = 'string' | 'number' | 'integer' | 'boolean' | 'date' | 'geometry' | 'codelist' | 'json' | 'relation' | 'object' | 'array';
 
 export type GeometryType = 'Point' | 'LineString' | 'Polygon' | 'MultiPoint' | 'MultiLineString' | 'MultiPolygon' | 'GeometryCollection' | 'None'; 
@@ -41,7 +40,6 @@ export interface ModelProperty {
     relationType: 'foreign_key' | 'intersects' | 'contains' | 'within' | 'touches' | 'crosses';
     cascadeDelete?: boolean;
   };
-  // 2. Lagt til subProperties for nøstede objekter:
   subProperties?: ModelProperty[]; 
 }
 

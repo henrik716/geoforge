@@ -15,7 +15,8 @@ import {
   DataModel, Layer, ModelProperty, PropertyType, GeometryType, PropertyConstraints, ImportValidationResult, ImportWarning, ImportError
 } from '../types';
 import { createEmptyModel, createEmptyProperty, createEmptyLayer } from '../constants';
-import { normalizeGeometryType, mapSqlTypeToPropertyType, InferredDataSummary, InferredLayerSummary } from './importUtils';
+import { normalizeGeometryType } from './geomUtils';
+import { InferredDataSummary, InferredLayerSummary } from './importUtils';
 
 // ============================================================
 // GDAL instance — lazy loaded, singleton
@@ -576,8 +577,6 @@ export const processFilesWithGdal = async (
           const splitFile = new File([blob], `${layerName}.geojson`, { type: 'application/json' });
           filesToProcess.push(splitFile);
         }
-        
-        console.log(`🔍 Split mixed-geometry GeoJSON into ${filesToProcess.length} layers by type`);
       }
     } catch (err) {
       console.warn('Could not pre-process GeoJSON for geometry splitting, continuing with normal flow:', err);
@@ -604,10 +603,7 @@ export const processFilesWithGdal = async (
   const warnings: ImportWarning[] = [];
   const errors: ImportError[] = [];
 
-  console.log('🔍 GDAL VALIDATION - checking layers:', result.summary.layers.length);
-
   for (const layerSummary of result.summary.layers) {
-    console.log('🔍 GDAL VALIDATION - layer:', layerSummary.tableName, 'pk:', layerSummary.primaryKeyColumn);
     
     // Find the corresponding model layer to check properties (like DeployPanel does)
     const modelLayer = result.model.layers.find(l => l.name === layerSummary.tableName);
@@ -618,7 +614,6 @@ export const processFilesWithGdal = async (
     );
     
     if (!hasIdField) {
-      console.log('🔍 GDAL VALIDATION - MISSING ID FIELD for:', layerSummary.tableName);
       warnings.push({
         type: 'no_primary_key',
         layerName: layerSummary.tableName,
@@ -627,12 +622,8 @@ export const processFilesWithGdal = async (
         suggestion: "Add an INTEGER PRIMARY KEY column (e.g., 'id' or 'fid')",
         severity: 'error'
       });
-    } else {
-      console.log('🔍 GDAL VALIDATION - ID field found for:', layerSummary.tableName);
     }
   }
-
-  console.log('🔍 GDAL VALIDATION - warnings generated:', warnings.length);
 
   const validation: ImportValidationResult = {
     warnings,

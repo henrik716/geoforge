@@ -1,57 +1,14 @@
 import { DataModel, GeometryType, PropertyType, ModelProperty, SharedType } from '../types';
 import { COLORS } from '../constants';
+import { hexToRgb } from './colorUtils';
+import { getSqlType, getSqliteType } from './typeMapUtils';
+import { normalizeGeometryType } from './geomUtils';
+
+export { hexToRgb } from './colorUtils';
+export { getSqlType, getSqliteType } from './typeMapUtils';
+export { normalizeGeometryType } from './geomUtils';
 
 declare var initSqlJs: any;
-
-export const hexToRgb = (hex: string) => {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16)
-  } : { r: 0, g: 0, b: 0 };
-};
-
-export const getSqlType = (type: PropertyType): string => {
-  switch (type) {
-    case 'integer': return 'INTEGER';
-    case 'number': return 'DOUBLE PRECISION';
-    case 'boolean': return 'BOOLEAN';
-    case 'date': return 'TIMESTAMP';
-    case 'json': return 'JSONB';
-    case 'object': return 'JSONB';
-    case 'array': return 'JSONB';
-    case 'shared_type': return 'JSONB'; // Lagres som JSONB i Postgres
-    case 'relation': return 'TEXT';
-    default: return 'TEXT';
-  }
-};
-
-export const getSqliteType = (type: PropertyType): string => {
-  switch (type) {
-    case 'integer': return 'INTEGER';
-    case 'number': return 'REAL';
-    case 'boolean': return 'INTEGER'; 
-    case 'object': return 'TEXT';     
-    case 'array': return 'TEXT';      
-    case 'shared_type': return 'TEXT'; // SQLite lagrer JSON som tekst
-    case 'relation': return 'TEXT';
-    default: return 'TEXT';
-  }
-};
-
-export const normalizeGeometryType = (type: string): GeometryType => {
-  const t = type.toLowerCase();
-  if (t === 'none') return 'None';
-  if (t.includes('multipolygon')) return 'MultiPolygon';
-  if (t.includes('multilinestring')) return 'MultiLineString';
-  if (t.includes('multipoint')) return 'MultiPoint';
-  if (t.includes('polygon')) return 'Polygon';
-  if (t.includes('linestring')) return 'LineString';
-  if (t.includes('point')) return 'Point';
-  if (t.includes('collection')) return 'GeometryCollection';
-  return 'Polygon'; 
-};
 
 // --- Recursive helper to build JSON Schema property definitions ---
 const buildPropertySchema = (p: ModelProperty, model: DataModel): any => {

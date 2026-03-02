@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect, useId, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Database, Cloud, Zap, Server, ChevronRight, ChevronDown,
-  Check, Eye, EyeOff, Table, Clock, RefreshCw, Package, Upload, X,
-  Layers, FileCode, Shield, Link2, ArrowRight, DatabaseZap,
+  Check, Clock, RefreshCw, Package, Table,
+  Layers, FileCode, Shield, Link2,
   Settings2, FileText, Info, Globe, Github, ExternalLink, Download, GitPullRequest, AlertTriangle
 } from 'lucide-react';
 import {
@@ -12,6 +12,9 @@ import {
 import { generateDeployFiles, generatePygeoapiConfig, exportDeployKit } from '../utils/deployUtils';
 import { pushDeployKit, checkRepoAccess, DeployPushResult } from '../utils/githubService';
 import ImportWarnings from './ImportWarnings';
+import SourceTypePicker, { SOURCE_META } from './deploy/SourceTypePicker';
+import ConnectionForm from './deploy/ConnectionForm';
+import LayerMappingCard from './deploy/LayerMappingCard';
 
 interface DeployPanelProps {
   model: DataModel;
@@ -22,72 +25,6 @@ interface DeployPanelProps {
 }
 
 // ============================================================
-// Source type metadata
-// ============================================================
-const SOURCE_META: Record<SourceType, { icon: React.ReactNode; colorClass: string }> = {
-  postgis: {
-    icon: <Database size={24} />,
-    colorClass: 'bg-blue-50 text-blue-600 border-blue-100',
-  },
-  supabase: {
-    icon: <Zap size={24} />,
-    colorClass: 'bg-emerald-50 text-emerald-600 border-emerald-100',
-  },
-  databricks: {
-    icon: <DatabaseZap size={24} />,
-    colorClass: 'bg-[#fff1f0] text-[#ff3621] border-[#ffccc7]',
-  },
-  geopackage: {
-    icon: <Package size={24} />,
-    colorClass: 'bg-amber-50 text-amber-600 border-amber-100',
-  }
-};
-
-// ============================================================
-// Reusable Field Component
-// ============================================================
-const Field: React.FC<{
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  hint?: string;
-  type?: 'text' | 'password';
-}> = ({ label, value, onChange, placeholder, hint, type = 'text' }) => {
-  const [visible, setVisible] = useState(false);
-  const inputId = useId();
-  const isPassword = type === 'password';
-
-  return (
-    <div className="space-y-1.5">
-      <label htmlFor={inputId} className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1 cursor-pointer">
-        {label}
-      </label>
-      <div className="relative">
-        <input
-          id={inputId}
-          type={isPassword && !visible ? 'password' : 'text'}
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 text-xs font-bold text-slate-800 outline-none focus:ring-4 focus:ring-violet-500/10 focus:border-violet-400 transition-all"
-        />
-        {isPassword && (
-          <button
-            type="button"
-            onClick={() => setVisible(!visible)}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-          >
-            {visible ? <EyeOff size={18} /> : <Eye size={18} />}
-          </button>
-        )}
-      </div>
-      {hint && <p className="text-[10px] text-slate-400 font-medium px-1 leading-relaxed">{hint}</p>}
-    </div>
-  );
-};
-
-// ============================================================
 // Main DeployPanel Component
 // ============================================================
 const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChange, validation }) => {
@@ -96,7 +33,6 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
   const [sourceType, setSourceType] = useState<SourceType | null>(null);
   const [includeData, setIncludeData] = useState(false);
   const [localDataFile, setLocalDataFile] = useState<{ blob: Blob; filename: string } | null>(null);
-  const gpkgFileInputRef = useRef<HTMLInputElement>(null);
 
   // Connection states
   const [pgConfig, setPgConfig] = useState<PostgresConfig>({
@@ -254,7 +190,6 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
   };
 
   const stepIcons = [Database, Link2, Table, Github];
-  const sourceTypes: SourceType[] = ['postgis', 'supabase', 'databricks', 'geopackage'];
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 md:space-y-12 pb-40 px-2 md:px-4">
@@ -302,126 +237,23 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
 
       {/* STEP 0: SOURCE SELECTION */}
       {step === 0 && (
-        <section className="bg-white p-6 md:p-10 rounded-[32px] border border-slate-200 shadow-sm space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <div className="flex items-center gap-6">
-            <div className="w-14 h-14 rounded-2xl bg-violet-50 flex items-center justify-center text-violet-600 border border-violet-100 shrink-0"><Cloud size={28} /></div>
-            <div>
-              <h3 className="text-lg md:text-xl font-black text-slate-800 tracking-tight leading-none mb-1">{d.sourceTitle}</h3>
-              <p className="text-xs text-slate-500 font-medium">{d.subtitle}</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {sourceTypes.map(type => {
-              const meta = SOURCE_META[type];
-              return (
-                <button 
-                  key={type} 
-                  onClick={() => { setSourceType(type); setStep(1); }} 
-                  className={`text-left p-6 rounded-[24px] border-2 transition-all flex flex-col items-start gap-4 active:scale-95 group hover:scale-[1.02] ${
-                    sourceType === type ? 'border-violet-400 bg-violet-50 shadow-xl' : 'border-slate-100 bg-white shadow-sm'
-                  }`}
-                >
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center border shrink-0 transition-transform group-hover:rotate-3 ${meta.colorClass}`}>
-                    {meta.icon}
-                  </div>
-                  <div>
-                    <h3 className="text-[10px] font-black text-slate-800 uppercase tracking-widest mb-1">{d.sources[type] || type}</h3>
-                    <p className="text-[10px] text-slate-500 font-medium leading-tight">{d.sources[`${type}Desc`] || `Connect to ${type}`}</p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </section>
+        <SourceTypePicker sourceType={sourceType} onSelect={(type) => { setSourceType(type); setStep(1); }} t={t} />
       )}
 
       {/* STEP 1: CONNECTION DETAILS */}
       {step === 1 && sourceType && (
-        <section className="bg-white p-6 md:p-10 rounded-[32px] border border-slate-200 shadow-sm space-y-8 max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <div className="flex items-center gap-6">
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border shrink-0 ${SOURCE_META[sourceType].colorClass}`}>
-              {SOURCE_META[sourceType].icon}
-            </div>
-            <div>
-              <h3 className="text-lg md:text-xl font-black text-slate-800 tracking-tight leading-none mb-1">{d.connectionTitle}</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{d.sources[sourceType] || sourceType}</p>
-            </div>
-          </div>
-          <div className="p-8 bg-slate-50 rounded-[24px] border border-slate-100 space-y-6">
-            {sourceType === 'postgis' && (
-              <React.Fragment>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                  <div className="sm:col-span-2"><Field label={d.fields.host} value={pgConfig.host} onChange={v => setPgConfig(p => ({ ...p, host: v }))} placeholder="localhost" /></div>
-                  <Field label={d.fields.port} value={pgConfig.port} onChange={v => setPgConfig(p => ({ ...p, port: v }))} placeholder="5432" />
-                </div>
-                <Field label={d.fields.database} value={pgConfig.dbname} onChange={v => setPgConfig(p => ({ ...p, dbname: v }))} placeholder="geodata" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  <Field label={d.fields?.user} value={pgConfig.user} onChange={v => setPgConfig(p => ({ ...p, user: v }))} placeholder="postgres" />
-                  <Field label={d.fields?.password} value={pgConfig.password} onChange={v => setPgConfig(p => ({ ...p, password: v }))} type="password" />
-                </div>
-                <Field label={d.fields.schema} value={pgConfig.schema} onChange={v => setPgConfig(p => ({ ...p, schema: v }))} placeholder="public" />
-              </React.Fragment>
-            )}
-            {sourceType === 'supabase' && (
-              <React.Fragment>
-                <Field label={d.fields.projectUrl} value={supaConfig.projectUrl} onChange={v => setSupaConfig(p => ({ ...p, projectUrl: v }))} placeholder="https://abcdef.supabase.co" hint={d.supabaseHint} />
-                <Field label={d.fields.anonKey} value={supaConfig.anonKey} onChange={v => setSupaConfig(p => ({ ...p, anonKey: v }))} type="password" />
-                <Field label={d.fields.schema} value={supaConfig.schema} onChange={v => setSupaConfig(p => ({ ...p, schema: v }))} placeholder="public" />
-              </React.Fragment>
-            )}
-            {sourceType === 'databricks' && (
-              <React.Fragment>
-                <Field label={d.fields.serverHostname} value={dbConfig.host} onChange={v => setDbConfig(p => ({ ...p, host: v }))} />
-                <Field label={d.fields.httpPath} value={dbConfig.httpPath} onChange={v => setDbConfig(p => ({ ...p, httpPath: v }))} />
-                <Field label={d.fields.accessToken} value={dbConfig.token} onChange={v => setDbConfig(p => ({ ...p, token: v }))} type="password" />
-                <div className="grid grid-cols-2 gap-6">
-                  <Field label={d.fields.catalog} value={dbConfig.catalog} onChange={v => setDbConfig(p => ({ ...p, catalog: v }))} />
-                  <Field label={d.fields.schema} value={dbConfig.schema} onChange={v => setDbConfig(p => ({ ...p, schema: v }))} />
-                </div>
-              </React.Fragment>
-            )}
-            {sourceType === 'geopackage' && (
-              <React.Fragment>
-                <Field 
-                  label={d.gpkgFilename} 
-                  value={gpkgConfig.filename} 
-                  onChange={v => setGpkgConfig(p => ({ ...p, filename: v }))} 
-                  hint={d.gpkgHint} 
-                />
-                <div className="space-y-3">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">{d.includeDataFile}</label>
-                  <input type="file" ref={gpkgFileInputRef} className="hidden" accept=".gpkg,.sqlite" onChange={e => {
-                    const f = e.target.files?.[0];
-                    if (f) {
-                      setLocalDataFile({ blob: f, filename: f.name });
-                      setGpkgConfig(p => ({ ...p, filename: f.name }));
-                      setIncludeData(true);
-                    }
-                  }} />
-                  {localDataFile ? (
-                    <div className="flex items-center gap-3 bg-emerald-50 text-emerald-700 px-5 py-3 rounded-2xl border border-emerald-200">
-                      <Check size={16} strokeWidth={3} />
-                      <span className="text-xs font-black truncate flex-1">{localDataFile.filename}</span>
-                      <span className="text-[10px] font-bold text-emerald-500">{localDataFile.blob.size < 1024 * 1024 ? `${(localDataFile.blob.size / 1024).toFixed(1)} KB` : `${(localDataFile.blob.size / (1024 * 1024)).toFixed(1)} MB`}</span>
-                      <button onClick={() => { setLocalDataFile(null); setIncludeData(false); }} className="text-emerald-400 hover:text-rose-500 transition-colors"><X size={16}/></button>
-                    </div>
-                  ) : (
-                    <button 
-                      onClick={() => gpkgFileInputRef.current?.click()}
-                      className="w-full flex items-center justify-center gap-3 px-5 py-4 rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 hover:border-violet-300 hover:text-violet-500 transition-all text-xs font-bold"
-                    >
-                      <Upload size={16} /> {d.includeDataUpload}
-                    </button>
-                  )}
-                </div>
-              </React.Fragment>
-            )}
-          </div>
-          <div className="flex gap-4">
-            <button onClick={() => setStep(0)} className="px-8 py-4 rounded-2xl border-2 bg-white border-slate-200 text-slate-500 font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all hover:border-slate-300">{d.back}</button>
-            <button onClick={() => setStep(2)} disabled={!isConnectionValid()} className="px-8 py-4 rounded-2xl bg-violet-600 text-white font-black text-[10px] uppercase tracking-widest disabled:opacity-50 shadow-lg shadow-violet-200 active:scale-95 transition-all hover:bg-violet-700">{d.next}</button>
-          </div>
-        </section>
+        <ConnectionForm
+          sourceType={sourceType}
+          pgConfig={pgConfig} supaConfig={supaConfig} dbConfig={dbConfig} gpkgConfig={gpkgConfig}
+          onPgChange={setPgConfig} onSupaChange={setSupaConfig} onDbChange={setDbConfig} onGpkgChange={setGpkgConfig}
+          localDataFile={localDataFile}
+          onLocalDataFileChange={setLocalDataFile}
+          onIncludeDataChange={setIncludeData}
+          isConnectionValid={isConnectionValid()}
+          onBack={() => setStep(0)}
+          onNext={() => setStep(2)}
+          t={t}
+        />
       )}
 
       {/* STEP 2: LAYER MAPPING */}
@@ -436,103 +268,19 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
           </div>
 
           <div className="space-y-6 pb-20">
-            {model.layers.map(layer => {
-              const m = layerMappings[layer.id];
-              const isExpanded = expandedLayer === layer.id;
-              const isMapped = !!m?.sourceTable;
-
-              return (
-                <div key={layer.id} className={`bg-white rounded-[24px] border transition-all overflow-hidden ${isExpanded ? 'border-violet-200 ring-4 ring-violet-500/5' : 'border-slate-200 shadow-sm'}`}>
-                  <button onClick={() => setExpandedLayer(isExpanded ? null : layer.id)} className="w-full flex items-center justify-between p-6 hover:bg-slate-50 transition-colors">
-                    <div className="flex items-center gap-4">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isMapped ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400'}`}>
-                        {isMapped ? <Check size={20} /> : <Table size={20} />}
-                      </div>
-                      <div className="text-left">
-                        <span className="text-sm font-black uppercase tracking-widest text-slate-800 block">{layer.name}</span>
-                        <span className="text-[10px] font-mono text-slate-400">{m?.sourceTable || d.notConnected}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                       {m?.timestampColumn && (
-                          <span className="hidden sm:flex text-[9px] bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg font-black uppercase tracking-tighter items-center gap-1">
-                            <Clock size={10} /> delta
-                          </span>
-                       )}
-                       {isExpanded ? <ChevronDown size={20} className="text-slate-300" /> : <ChevronRight size={20} className="text-slate-300" />}
-                    </div>
-                  </button>
-
-                  {isExpanded && (
-                    <div className="px-6 pb-8 pt-6 bg-slate-50/50 border-t border-slate-100">
-                      
-                      {/* Database Configurations */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-                        <Field 
-                          label={d.sourceTable || 'Source Table'} 
-                          value={m?.sourceTable || ''} 
-                          onChange={v => updateMapping(layer.id, { sourceTable: v })} 
-                          hint={sourceType === 'geopackage' ? 'Layer name inside GeoPackage' : (d.sourceTableHint || 'Table name in database')} 
-                        />
-                        <Field 
-                          label={d.primaryKeyColumn || 'Primary Key'} 
-                          value={m?.primaryKeyColumn || 'fid'} 
-                          onChange={v => updateMapping(layer.id, { primaryKeyColumn: v })} 
-                          placeholder="fid" 
-                          hint={d.primaryKeyHint || 'Unique identifier column (e.g. fid, id)'} 
-                        />
-                      </div>
-
-                      {/* Timestamp Selection - Hidden for GeoPackage */}
-                      {sourceType !== 'geopackage' && (
-                        <div className="space-y-1.5 mb-8">
-                          <label className="text-[10px] font-black uppercase text-slate-400 px-1 flex items-center gap-2">
-                              {d.timestampColumn || 'Timestamp Column'}
-                              <div className="group relative">
-                                <Info size={14} className="text-slate-300 cursor-help hover:text-violet-500 transition-colors" />
-                                <div className="absolute bottom-full left-0 md:left-1/2 md:-translate-x-1/2 mb-3 w-72 p-4 bg-slate-900 text-white text-[10px] rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 shadow-2xl font-medium leading-relaxed border border-slate-700">
-                                    {d.timestampExplainer}
-                                </div>
-                              </div>
-                          </label>
-                          <div className="relative">
-                            <select 
-                              value={m?.timestampColumn || ''} 
-                              onChange={e => updateMapping(layer.id, { timestampColumn: e.target.value })} 
-                              className="w-full bg-white border border-slate-200 rounded-2xl px-5 py-4 text-xs font-bold outline-none appearance-none focus:ring-4 focus:ring-violet-500/10 focus:border-violet-400 transition-all cursor-pointer shadow-sm"
-                            >
-                              <option value="">{d.noTimestamp}</option>
-                              {layer.properties.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                            </select>
-                            <ChevronDown size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none" />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Field Mapping Grid */}
-                      <div className="bg-white border border-slate-200 rounded-[28px] overflow-hidden shadow-sm">
-                        <div className="grid grid-cols-[1fr_auto_1fr] px-8 py-5 bg-slate-50 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                          <span>{d.fieldMapping || 'Property'}</span><span className="w-6"></span><span>{d.sourceTable || 'Source Field'}</span>
-                        </div>
-                        <div className="p-4 space-y-1 max-h-[350px] overflow-y-auto custom-scrollbar">
-                          {layer.properties.map(prop => (
-                            <div key={prop.id} className="grid grid-cols-[1fr_auto_1fr] gap-4 items-center px-4 py-3 hover:bg-slate-50 rounded-2xl transition-colors">
-                              <span className="text-xs font-bold text-slate-700 truncate">{prop.name}</span>
-                              <ArrowRight size={16} className="text-slate-200" />
-                              <input 
-                                value={(m?.fieldMappings || {})[prop.id] || prop.name} 
-                                onChange={e => handleFieldChange(layer.id, prop.id, e.target.value)} 
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-mono outline-none focus:ring-4 focus:ring-violet-500/10 focus:border-violet-400 transition-all" 
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {model.layers.map(layer => (
+              <LayerMappingCard
+                key={layer.id}
+                layer={layer}
+                mapping={layerMappings[layer.id]}
+                isExpanded={expandedLayer === layer.id}
+                sourceType={sourceType}
+                onToggle={() => setExpandedLayer(expandedLayer === layer.id ? null : layer.id)}
+                onUpdateMapping={(updates) => updateMapping(layer.id, updates)}
+                onFieldChange={(propId, val) => handleFieldChange(layer.id, propId, val)}
+                t={t}
+              />
+            ))}
           </div>
 
           {/* Sticky Footer */}
@@ -562,7 +310,7 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
             {[
               { label: d.source, val: sourceType, icon: SOURCE_META[sourceType!]?.icon },
               { label: d.layersLabel, val: model.layers.length, icon: <Layers size={14}/> },
-              { label: d.changeTracking, val: sourceType === 'geopackage' ? 'Static File' : `${Object.values(layerMappings).filter(m => m.timestampColumn).length} delta`, icon: <Clock size={14}/> },
+              { label: d.changeTracking, val: sourceType === 'geopackage' ? 'Static File' : `${Object.values(layerMappings).filter((m: LayerSourceMapping) => m.timestampColumn).length} delta`, icon: <Clock size={14}/> },
               { label: 'CRS', val: model.crs || 'EPSG:25833', icon: <Globe size={14}/> }
             ].map((stat, i) => (
               <div key={i} className="bg-slate-900 p-8 flex flex-col gap-2">
@@ -703,7 +451,7 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
             )}
           </div>
 
-          {/* File inventory — dynamisk basert på deployTarget */}
+          {/* File inventory — based on deployTarget */}
           <div className="px-8 md:px-12 pb-8 space-y-6">
             <div className="flex items-center gap-3">
               <div className="w-2 h-2 rounded-full bg-emerald-500" />

@@ -27,7 +27,7 @@ export const compareModels = (baseline: DataModel | null, current: DataModel, t:
 
   const emptyLabel = `(${t.review?.empty || 'empty'})`;
 
-  // --- HJELPEFUNKSJON: SAMLE FELT FOR UNDER-EGENSKAPER (REKURSIVT) ---
+  // Collect sub-property fields recursively
   const collectSubPropertyFields = (
     props: ModelProperty[], 
     path: string
@@ -57,7 +57,7 @@ export const compareModels = (baseline: DataModel | null, current: DataModel, t:
     return fields;
   };
 
-  // --- REKURSIV FUNKSJON FOR Å SAMMENLIGNE EGENSKAPER ---
+  // Recursively compare properties between baseline and current
   const compareProperties = (
     baseProps: ModelProperty[], 
     currProps: ModelProperty[], 
@@ -260,7 +260,7 @@ export const compareModels = (baseline: DataModel | null, current: DataModel, t:
 
 
 
-// --- RESTRUKTURERING OG HJELPEFUNKSJONER ---
+// Structured change helpers
 
 export interface StructuredChanges {
   modelMeta: ModelChange[];
