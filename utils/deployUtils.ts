@@ -308,16 +308,11 @@ export const generateQgisProject = (
 
   const gpkgFilename = getGpkgFilename(model, source);
 
-  // WMS CRS list — the native CRS must be included here or QGIS Server will
-  // not advertise it in GetCapabilities, regardless of the project/layer CRS.
-  // Native CRS is listed first as a hint to clients that it is preferred.
   const wmsCrsList = [authid, 'EPSG:4326', 'EPSG:4258', 'EPSG:3857', 'CRS:84']
-    .filter((v, i, arr) => arr.indexOf(v) === i) // deduplicate (e.g. if native is already 4326)
+    .filter((v, i, arr) => arr.indexOf(v) === i)
     .map(c => `      <value>${c}</value>`)
     .join('\n');
 
-  // WMS extent for GetCapabilities — use model metadata bbox if available.
-  // Coordinates must be in the project CRS.
   const ext = model.metadata?.spatialExtent;
   const wmsExtent = ext?.westBoundLongitude && ext?.southBoundLatitude
     ? `${ext.westBoundLongitude} ${ext.southBoundLatitude} ${ext.eastBoundLongitude} ${ext.northBoundLatitude}`
@@ -347,12 +342,10 @@ export const generateQgisProject = (
       const opacity = layer.style.fillOpacity !== undefined ? layer.style.fillOpacity : 1;
       const rgb = hexToRgb(layer.style.simpleColor || '#3b82f6');
       const qColor = `${rgb.r},${rgb.g},${rgb.b},255`;
-      // Outline color: same hue at full opacity
       const qOutlineColor = `${rgb.r},${rgb.g},${rgb.b},255`;
       const isPoint = layer.geometryType.includes('Point');
       const isLine = layer.geometryType.includes('LineString');
 
-      // Map UI lineDash values → QGIS line_style values
       const qLineStyle: Record<string, string> = {
         solid: 'solid', dashed: 'dash', dotted: 'dot',
         'dash-dot': 'dash dot', 'dash-dot-dot': 'dash dot dot', 'long-dash': 'dash',
@@ -360,18 +353,15 @@ export const generateQgisProject = (
       const lineStyle = qLineStyle[layer.style.lineDash || 'solid'] || 'solid';
       const lineWidth = layer.style.lineWidth || 2;
 
-      // Map UI pointIcon values → QGIS SimpleMarker name values
       const qMarkerName: Record<string, string> = {
         circle: 'circle', square: 'square', triangle: 'triangle', star: 'star',
       };
       const markerName = qMarkerName[layer.style.pointIcon || 'circle'] || 'circle';
 
-      // Map UI hatchStyle values → QGIS SimpleFill style values
-      // When custom hatching properties are set, use LinePatternFill for precise control
       const hasCustomHatching = layer.style.hatchStyle && 
         layer.style.hatchStyle !== 'solid' && 
-        (layer.style.hatchSpacing !== undefined || 
-         layer.style.hatchThickness !== undefined);
+        (layer.style.hatchSpacing !== undefined || layer.style.hatchThickness !== undefined);
+
       const fillStyle = (layer.style.hatchStyle && layer.style.hatchStyle !== 'solid')
         ? layer.style.hatchStyle
         : 'solid';
@@ -400,84 +390,57 @@ export const generateQgisProject = (
           </layer>
         </symbol>`;
       } else {
-        // Map hatch styles to angles (in degrees)
-        const hatchAngles: Record<string, number> = {
-          horizontal: 0,
-          vertical: 90,
-          b_diagonal: 45,  // Back diagonal (\)
-          f_diagonal: -45, // Forward diagonal (/)
-        };
+        // --- POLYGONS ---
+        
+        // Helper to generate a QGIS 3.x valid LinePatternFill
+        const createPatternLayer = (angle: number, distance: number, thickness: number) => `
+          <layer class="LinePatternFill">
+            <prop k="angle" v="${angle}"/>
+            <prop k="distance" v="${distance}"/>
+            <prop k="distance_unit" v="Point"/>
+            <symbol type="line" name="@0@0">
+              <layer class="SimpleLine">
+                <prop k="line_color" v="${qColor}"/>
+                <prop k="line_width" v="${thickness}"/>
+                <prop k="line_width_unit" v="Point"/>
+                <prop k="line_style" v="solid"/>
+              </layer>
+            </symbol>
+          </layer>`;
 
-        if (hasCustomHatching && hatchAngles[layer.style.hatchStyle!]) {
-          // Use LinePatternFill for precise control when custom properties are set
-          const angle = hatchAngles[layer.style.hatchStyle!];
+        // The outer border of the polygon
+        const polygonOutlineLayer = `
+          <layer class="SimpleLine">
+            <prop k="line_color" v="${qOutlineColor}"/>
+            <prop k="line_width" v="${lineWidth}"/>
+            <prop k="line_width_unit" v="Point"/>
+            <prop k="line_style" v="${lineStyle}"/>
+            <prop k="joinstyle" v="round"/>
+          </layer>`;
+
+        if (hasCustomHatching) {
           const distance = layer.style.hatchSpacing || 6;
-          const lineWidth = layer.style.hatchThickness || 1;
+          const hatchThickness = layer.style.hatchThickness || 1;
 
-          // For cross and diagonal_x patterns, we need multiple layers
+          let patternLayers = '';
           if (layer.style.hatchStyle === 'cross') {
-            symbolXml = `<symbol alpha="${opacity}" type="fill" name="0">
-              <layer class="LinePatternFill">
-                <prop k="color" v="${qColor}"/>
-                <prop k="angle" v="0"/>
-                <prop k="distance" v="${distance}"/>
-                <prop k="line_width" v="${lineWidth}"/>
-                <prop k="line_width_unit" v="Point"/>
-                <prop k="outline_color" v="${qOutlineColor}"/>
-                <prop k="outline_width" v="${lineWidth}"/>
-                <prop k="outline_width_unit" v="Point"/>
-                <prop k="outline_style" v="${lineStyle}"/>
-                <prop k="joinstyle" v="miter"/>
-              </layer>
-              <layer class="LinePatternFill">
-                <prop k="color" v="${qColor}"/>
-                <prop k="angle" v="90"/>
-                <prop k="distance" v="${distance}"/>
-                <prop k="line_width" v="${lineWidth}"/>
-                <prop k="line_width_unit" v="Point"/>
-              </layer>
-            </symbol>`;
+            patternLayers = createPatternLayer(0, distance, hatchThickness) + createPatternLayer(90, distance, hatchThickness);
           } else if (layer.style.hatchStyle === 'diagonal_x') {
-            symbolXml = `<symbol alpha="${opacity}" type="fill" name="0">
-              <layer class="LinePatternFill">
-                <prop k="color" v="${qColor}"/>
-                <prop k="angle" v="45"/>
-                <prop k="distance" v="${distance}"/>
-                <prop k="line_width" v="${lineWidth}"/>
-                <prop k="line_width_unit" v="Point"/>
-                <prop k="outline_color" v="${qOutlineColor}"/>
-                <prop k="outline_width" v="${lineWidth}"/>
-                <prop k="outline_width_unit" v="Point"/>
-                <prop k="outline_style" v="${lineStyle}"/>
-                <prop k="joinstyle" v="miter"/>
-              </layer>
-              <layer class="LinePatternFill">
-                <prop k="color" v="${qColor}"/>
-                <prop k="angle" v="-45"/>
-                <prop k="distance" v="${distance}"/>
-                <prop k="line_width" v="${lineWidth}"/>
-                <prop k="line_width_unit" v="Point"/>
-              </layer>
-            </symbol>`;
+            patternLayers = createPatternLayer(45, distance, hatchThickness) + createPatternLayer(-45, distance, hatchThickness);
           } else {
-            // Single pattern (horizontal, vertical, b_diagonal, f_diagonal)
-            symbolXml = `<symbol alpha="${opacity}" type="fill" name="0">
-              <layer class="LinePatternFill">
-                <prop k="color" v="${qColor}"/>
-                <prop k="angle" v="${angle}"/>
-                <prop k="distance" v="${distance}"/>
-                <prop k="line_width" v="${lineWidth}"/>
-                <prop k="line_width_unit" v="Point"/>
-                <prop k="outline_color" v="${qOutlineColor}"/>
-                <prop k="outline_width" v="${lineWidth}"/>
-                <prop k="outline_width_unit" v="Point"/>
-                <prop k="outline_style" v="${lineStyle}"/>
-                <prop k="joinstyle" v="miter"/>
-              </layer>
-            </symbol>`;
+            const hatchAngles: Record<string, number> = {
+              horizontal: 0, vertical: 90, b_diagonal: 45, f_diagonal: -45,
+            };
+            const angle = hatchAngles[layer.style.hatchStyle!] || 0;
+            patternLayers = createPatternLayer(angle, distance, hatchThickness);
           }
+
+          symbolXml = `<symbol alpha="${opacity}" type="fill" name="0">
+            ${patternLayers}
+            ${polygonOutlineLayer}
+          </symbol>`;
         } else {
-          // Use SimpleFill for basic hatching or solid fills
+          // Fallback to simple solid or basic predefined hatching
           symbolXml = `<symbol alpha="${opacity}" type="fill" name="0">
             <layer class="SimpleFill">
               <prop k="color" v="${qColor}"/>
@@ -486,7 +449,7 @@ export const generateQgisProject = (
               <prop k="outline_width" v="${lineWidth}"/>
               <prop k="outline_width_unit" v="Point"/>
               <prop k="outline_style" v="${lineStyle}"/>
-              <prop k="joinstyle" v="miter"/>
+              <prop k="joinstyle" v="round"/>
             </layer>
           </symbol>`;
         }
