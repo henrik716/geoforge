@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies without cache mount to avoid EBUSY errors
-RUN npm ci --omit=dev --prefer-offline --no-audit
+RUN npm ci --prefer-offline --no-audit
 
 # Copy application files
 COPY . .
