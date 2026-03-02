@@ -1,14 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Upload, Table, Copy, Check, Download, Play,
-  Terminal, RefreshCw, Database, 
-  X, Info, ExternalLink, HelpCircle, ArrowRightLeft, 
-  Layers, CheckCircle2, ListChecks, ArrowDown, Lock, ChevronDown, ChevronRight, Wand2,
-  Server, Shield, Globe, CloudDownload, Link2, Search, Settings2, FileCode, BookOpen,
-  ArrowRight, AlertTriangle
+import React, { useState, useRef } from 'react';
+import {
+  Upload, Table, Check, Play,
+  RefreshCw,
+  X, ArrowRightLeft,
+  Layers, CheckCircle2, ChevronDown,
+  Globe, BookOpen
 } from 'lucide-react';
 import { DataModel } from '../types';
 import { processAnyFile } from '../utils/importUtils';
+import FieldMappingTable from './mapper/FieldMappingTable';
+import ValueMappingModal from './mapper/ValueMappingModal';
+import TransformPanel from './mapper/TransformPanel';
 
 declare var initSqlJs: any;
 
@@ -34,28 +36,10 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t, onTransformedData }) 
   const [sourceFilename, setSourceFilename] = useState<string>('');
   const [sourceUrl, setSourceUrl] = useState<string>('');
   const [sourceFiles, setSourceFiles] = useState<File[]>([]);
-  const [copied, setCopied] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [openValueMapId, setOpenValueMapId] = useState<string | null>(null);
   const [showUrlInput, setShowUrlInput] = useState(false);
-  const [showScript, setShowScript] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Transform state
-  const [transformStatus, setTransformStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
-  const [transformedBlob, setTransformedBlob] = useState<Blob | null>(null);
-  const [transformError, setTransformError] = useState<string>('');
-
-  // PostGIS Specific State
-  const [targetType, setTargetType] = useState<'gpkg' | 'postgis'>('gpkg');
-  const [pgConfig, setPgConfig] = useState({
-    host: 'localhost',
-    port: '5432',
-    dbname: '',
-    user: 'postgres',
-    password: '',
-    schema: 'public'
-  });
 
   const activeLayer = model.layers.find(l => l.id === activeModelLayerId) || model.layers[0];
   const activeMapping = mappings[activeModelLayerId] || { sourceLayer: '', fieldMappings: {}, valueMappings: {} };
@@ -157,14 +141,10 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t, onTransformedData }) 
     setSourceFilename(file.name);
     setSourceUrl('');
     setSourceFiles(allFiles);
-    setTransformedBlob(null);
-    setTransformStatus('idle');
-    setTransformError('');
     setIsLoading(true);
 
     try {
-      // 1. Bruk den kraftige funksjonen for å hente ut struktur (tabeller og kolonner)
-      // Dette gir automatisk støtte for GML, XML, Shapefiles etc.
+      // Extract structure (tables and columns) — supports GML, XML, Shapefiles etc.
       const { model: sourceModel } = await processAnyFile(file);
 
       const layers: string[] = [];
@@ -320,179 +300,6 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t, onTransformedData }) 
     }));
   };
 
-  const generateOgrCommand = () => {
-    const lines: string[] = [];
-    
-    const targetOutput = targetType === 'gpkg' 
-      ? `"${model.name.replace(/\s/g, '_')}.gpkg"`
-      : `PG:"host=${pgConfig.host} port=${pgConfig.port} dbname=${pgConfig.dbname || 'database'} user=${pgConfig.user} password=${pgConfig.password || 'password'}"`;
-
-    const formatFlag = targetType === 'gpkg' ? '-f GPKG' : '-f PostgreSQL';
-    const sourceString = sourceUrl ? `"${sourceUrl}"` : `"${sourceFilename}"`;
-
-    Object.entries(mappings).forEach(([layerId, m]) => {
-      const mapping = m as LayerMapping;
-      if (!mapping.sourceLayer) return;
-      const modelLayer = model.layers.find(l => l.id === layerId);
-      if (!modelLayer) return;
-
-      const targetLayerName = modelLayer.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-      
-      const selectFields = modelLayer.properties
-        .filter(p => mapping.fieldMappings[p.id])
-        .map(p => {
-          const sourceF = mapping.fieldMappings[p.id];
-          const vMap = mapping.valueMappings[p.id];
-          
-          if (vMap && Object.keys(vMap).length > 0) {
-             let caseSql = `CASE `;
-             Object.entries(vMap).forEach(([src, trg]) => {
-                const trgVal = trg ? `'${trg}'` : 'NULL';
-                caseSql += `WHEN "${sourceF}" = '${src}' THEN ${trgVal} `;
-             });
-             caseSql += `ELSE "${sourceF}" END`;
-             return `${caseSql} AS "${p.name}"`;
-          }
-          
-          return `"${sourceF}" AS "${p.name}"`;
-        });
-      
-      const geomCol = modelLayer.geometryColumnName || 'geometri';
-      const sourceGeomCol = sourceGeomColumns[mapping.sourceLayer] || 'geometry';
-      const sql = `SELECT ${selectFields.length > 0 ? selectFields.join(', ') + ', ' : ''}"${sourceGeomCol}" FROM "${mapping.sourceLayer}"`;
-      
-      lines.push(`ogr2ogr ${formatFlag} ${targetOutput} ${sourceString} \\
-  -nln "${targetLayerName}" \\
-  -nlt ${modelLayer.geometryType.toUpperCase()} \\
-  -sql '${sql}' \\
-  ${targetType === 'postgis' ? `-lco SCHEMA=${pgConfig.schema} ` : ''}-update -append \\
-  -lco GEOMETRY_NAME=${geomCol}`);
-    });
-
-    return lines.join('\n\n');
-  };
-
-  // ============================================================
-  // Browser-side transform via gdal3.js WASM
-  // ============================================================
-  const handleTransform = async () => {
-    if (sourceFiles.length === 0 || mappedLayerCount === 0) return;
-    setTransformStatus('running');
-    setTransformError('');
-    setTransformedBlob(null);
-
-    try {
-      const { getGdal } = await import('../utils/gdalService');
-      const Gdal = await getGdal();
-
-      // Open all source files (may be multiple if split by geometry type)
-      const openResult = await Gdal.open(sourceFiles);
-      if (!openResult.datasets || openResult.datasets.length === 0) {
-        throw new Error('Kunne ikke åpne kildefilen');
-      }
-
-      const vfsOutputPath = `/vsimem/export_${Date.now()}.gpkg`;
-      let isFirstLayer = true;
-
-      for (const [layerId, m] of Object.entries(mappings)) {
-        const mapping = m as LayerMapping;
-        if (!mapping.sourceLayer) continue;
-        const modelLayer = model.layers.find(l => l.id === layerId);
-        if (!modelLayer) continue;
-
-        // Use the first dataset (all layers should be accessible from any opened dataset)
-        const dataset = openResult.datasets[0];
-
-        const targetLayerName = modelLayer.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-        const selectFields = modelLayer.properties
-          .filter(p => mapping.fieldMappings[p.id])
-          .map(p => {
-            const sourceF = mapping.fieldMappings[p.id];
-            const vMap = mapping.valueMappings[p.id];
-            if (vMap && Object.keys(vMap).length > 0) {
-              let caseSql = `CASE `;
-              Object.entries(vMap).forEach(([src, trg]) => {
-                caseSql += `WHEN "${sourceF}" = '${src}' THEN ${trg ? `'${trg}'` : 'NULL'} `;
-              });
-              caseSql += `ELSE "${sourceF}" END`;
-              return `${caseSql} AS "${p.name}"`;
-            }
-            return `"${sourceF}" AS "${p.name}"`;
-          });
-
-        const geomCol = modelLayer.geometryColumnName || 'geometry';
-        const sql = selectFields.length > 0 
-          ? `SELECT ${selectFields.join(', ')} FROM "${mapping.sourceLayer}"`
-          : `SELECT * FROM "${mapping.sourceLayer}"`;
-
-        const opts: string[] = [
-          '-f', 'GPKG',
-          '-nln', targetLayerName,
-          '-nlt', modelLayer.geometryType.toUpperCase(),
-          '-sql', sql,
-          '-lco', `GEOMETRY_NAME=${geomCol}`,
-        ];
-
-        if (!isFirstLayer) {
-          opts.push('-update', '-append');
-        }
-
-        opts.push(vfsOutputPath);
-        await Gdal.ogr2ogr(dataset, opts);
-        isFirstLayer = false;
-      }
-
-      // Close all datasets
-      for (const ds of openResult.datasets) {
-        try {
-          Gdal.close(ds);
-        } catch (e) {
-          // Ignore close errors
-        }
-      }
-
-      if (!isFirstLayer) {
-        const bytes = await Gdal.getFileBytes(vfsOutputPath);
-        const finalBlob = new Blob([bytes], { type: 'application/geopackage+sqlite3' });
-        setTransformedBlob(finalBlob);
-        setTransformStatus('done');
-      } else {
-        throw new Error('Ingen lag ble transformert');
-      }
-    } catch (err: any) {
-      console.error('Transform failed:', err);
-      setTransformError(err.message || 'Transformasjon feilet');
-      setTransformStatus('error');
-    }
-  };
-
-  const handleDownloadGpkg = () => {
-    if (!transformedBlob) return;
-    const url = URL.createObjectURL(transformedBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${model.name.replace(/\s/g, '_')}.gpkg`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleSendToPublish = () => {
-    if (!transformedBlob || !onTransformedData) return;
-    onTransformedData(transformedBlob, `${model.name.replace(/\s/g, '_')}.gpkg`);
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(generateOgrCommand());
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   const mappedLayerCount = Object.keys(mappings).filter(id => mappings[id].sourceLayer).length;
 
   return (
@@ -586,7 +393,7 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t, onTransformedData }) 
               <div className="flex items-center gap-3 bg-emerald-50 text-emerald-700 px-6 py-3 rounded-2xl border border-emerald-100 w-fit animate-in zoom-in-95">
                  <CheckCircle2 size={16} />
                  <span className="text-[10px] font-black uppercase tracking-widest truncate max-w-[200px] sm:max-w-[300px]">{sourceFilename}</span>
-                 <button onClick={() => { setSourceFilename(''); setSourceUrl(''); setSourceFiles([]); setSourceGeomColumns({}); setMappings({}); setTransformedBlob(null); setTransformStatus('idle'); }} className="ml-2 hover:text-rose-600 transition-colors"><X size={16}/></button>
+                 <button onClick={() => { setSourceFilename(''); setSourceUrl(''); setSourceFiles([]); setSourceGeomColumns({}); setMappings({}); }} className="ml-2 hover:text-rose-600 transition-colors"><X size={16}/></button>
               </div>
            )}
            <input type="file" ref={fileInputRef} className="hidden" accept=".geojson,.json,.gpkg,.sqlite,.gml,.xml,.kml,.kmz,.shp,.shx,.dbf,.prj,.cpg,.fgb,.tab,.mif,.csv,.gpx,.dxf" multiple onChange={handleFileUpload} />
@@ -645,349 +452,41 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t, onTransformedData }) 
       </section>
 
       {/* STEP 3: FIELD MAPPING TABLE */}
-      <section className={`transition-all duration-500 ${!activeMapping.sourceLayer ? 'opacity-30 grayscale pointer-events-none' : 'opacity-100'}`}>
-         <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-            <div className="px-6 py-6 md:px-10 bg-slate-50 border-b border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
-               <div className="flex items-center gap-6">
-                  <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 border border-emerald-100 shrink-0">
-                    <ArrowRightLeft size={28} />
-                  </div>
-                  <div>
-                     <h3 className="text-lg md:text-xl font-black text-slate-800 tracking-tight leading-none mb-1">{t.mapper.step3}</h3>
-                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{activeLayer?.name}</p>
-                  </div>
-               </div>
-               <button onClick={handleAutoMap} className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-emerald-700 transition-all active:scale-95 shadow-lg shadow-emerald-200">
-                  <Wand2 size={16}/> {t.mapper.autoMap}
-               </button>
-            </div>
-            
-            <div className="overflow-x-auto min-h-[400px]">
-               <table className="w-full text-left border-collapse min-w-[600px]">
-                  <thead className="sticky top-0 z-20 bg-slate-50/90 backdrop-blur-md border-b border-slate-100">
-                    <tr>
-                      <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 w-1/3">{t.mapper.targetFields}</th>
-                      <th className="px-4 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 w-24">Type</th>
-                      <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">{t.mapper.sourceFields}</th>
-                      <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 w-32 text-right">{t.mapper.mapValues}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {!activeLayer || activeLayer.properties.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="py-20 text-center text-slate-300 italic text-sm uppercase font-black tracking-widest">{t.mapper.noPropsTarget}</td>
-                      </tr>
-                    ) : (
-                      activeLayer.properties.map(prop => {
-                        const mappedField = activeMapping.fieldMappings[prop.id];
-                        const isValueMappable = (prop.type === 'codelist' || (prop.constraints?.enumeration && prop.constraints.enumeration.length > 0)) && !!mappedField;
-                        const valueMapCount = Object.keys(activeMapping.valueMappings[prop.id] || {}).length;
-
-                        return (
-                          <tr key={prop.id} className={`hover:bg-slate-50/80 transition-colors group ${mappedField ? 'bg-emerald-50/10' : ''}`}>
-                            <td className="px-6 py-3">
-                               <div className="font-black text-slate-800 text-sm mono">{prop.name}</div>
-                               <div className="text-[10px] text-slate-400 font-medium truncate max-w-[200px]">{prop.title}</div>
-                            </td>
-                            <td className="px-4 py-3">
-                               <span className="text-[9px] font-black uppercase tracking-[0.1em] px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
-                                 {t.types[prop.type]}
-                               </span>
-                            </td>
-                            <td className="px-6 py-3">
-                               <div className="relative group/select">
-                                  <select 
-                                    value={mappedField || ''} 
-                                    onChange={e => updateFieldMapping(prop.id, e.target.value)}
-                                    className={`w-full py-2.5 px-4 pr-10 rounded-xl text-xs font-bold border transition-all outline-none appearance-none cursor-pointer ${mappedField ? 'bg-white border-emerald-400 text-emerald-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-400'}`}
-                                  >
-                                     <option value="">{t.mapper.unmapped}</option>
-                                     {(allFields[activeMapping.sourceLayer] || []).map(f => <option key={f} value={f}>{f}</option>)}
-                                  </select>
-                                  <ChevronDown size={14} className={`absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none transition-colors ${mappedField ? 'text-emerald-500' : 'text-slate-300'}`} />
-                               </div>
-                            </td>
-                            <td className="px-6 py-3 text-right">
-                               {isValueMappable ? (
-                                  <button 
-                                    onClick={() => setOpenValueMapId(prop.id)}
-                                    className={`p-2.5 rounded-xl border transition-all relative ${valueMapCount > 0 ? 'bg-amber-100 border-amber-300 text-amber-700 shadow-sm' : 'bg-white border-slate-200 text-slate-300 hover:text-amber-500 hover:border-amber-300'}`}
-                                    title={t.mapper.mapValues}
-                                  >
-                                    <Wand2 size={18} />
-                                    {valueMapCount > 0 && <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-amber-500 text-white text-[9px] font-black flex items-center justify-center border-2 border-white">{valueMapCount}</span>}
-                                  </button>
-                               ) : (
-                                  <div className="p-2.5 text-slate-100"><Wand2 size={18} /></div>
-                               )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-               </table>
-            </div>
-         </div>
-      </section>
+      <FieldMappingTable
+        activeLayer={activeLayer}
+        activeMapping={activeMapping}
+        allFields={allFields}
+        t={t}
+        onAutoMap={handleAutoMap}
+        onUpdateFieldMapping={updateFieldMapping}
+        onOpenValueMap={(propId) => setOpenValueMapId(propId)}
+      />
 
       {/* FIXED OVERLAY MODAL FOR VALUE MAPPING */}
       {openValueMapId && (
-        <div className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300">
-          <div className="bg-white rounded-[40px] w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-400">
-             {/* Modal Header */}
-             <div className="p-8 bg-amber-50 border-b border-amber-100 flex items-center justify-between">
-                <div>
-                   <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">{t.mapper.mapValues}</h3>
-                   <p className="text-xs text-amber-600 font-bold uppercase tracking-widest mt-1">
-                      {activeLayer?.properties.find(p => p.id === openValueMapId)?.name}
-                   </p>
-                </div>
-                <button onClick={() => setOpenValueMapId(null)} className="p-3 bg-white hover:bg-rose-50 hover:text-rose-600 rounded-2xl transition-all shadow-sm">
-                   <X size={24}/>
-                </button>
-             </div>
-             
-             {/* Modal Content */}
-             <div className="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-6">
-                <div className="grid grid-cols-2 gap-8 px-4 text-[10px] font-black uppercase text-slate-400 tracking-widest">
-                   <span>Source Unique Value</span>
-                   <span>Map to Target</span>
-                </div>
-                <div className="space-y-3">
-                   {(uniqueValues[activeMapping.sourceLayer]?.[activeMapping.fieldMappings[openValueMapId]] || []).map(srcVal => {
-                      const prop = activeLayer?.properties.find(p => p.id === openValueMapId)!;
-                      const currentTarget = activeMapping.valueMappings[openValueMapId]?.[srcVal] || '';
-                      const allowedValues = prop.type === 'codelist' ? prop.codelistValues : (prop.constraints?.enumeration?.map(v => ({ code: v, label: v })) || []);
-                      
-                      return (
-                        <div key={srcVal} className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center p-4 bg-slate-50 border border-slate-100 rounded-3xl group/val hover:bg-slate-100/50 transition-colors">
-                           <div className="text-xs font-black mono text-slate-700 truncate bg-white px-4 py-2.5 rounded-2xl border border-slate-200 shadow-sm">{srcVal}</div>
-                           <div className="relative">
-                              <select 
-                                value={currentTarget} 
-                                onChange={e => updateValueMapping(openValueMapId, srcVal, e.target.value)}
-                                className={`w-full py-3 px-5 pr-10 rounded-2xl text-xs font-black border transition-all appearance-none cursor-pointer ${currentTarget ? 'bg-amber-50 border-amber-400 text-amber-700' : 'bg-white border-slate-200 text-slate-400 focus:border-amber-400'}`}
-                              >
-                                <option value="">{t.mapper.keepValue}</option>
-                                {allowedValues.map(av => <option key={av.code} value={av.code}>{av.label || av.code}</option>)}
-                              </select>
-                              <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-300 group-hover/val:text-amber-500 transition-colors"><ChevronDown size={16}/></div>
-                           </div>
-                        </div>
-                      );
-                   })}
-                </div>
-             </div>
-             
-             {/* Modal Footer */}
-             <div className="p-8 border-t border-slate-100 bg-slate-50/50 flex justify-end">
-                <button onClick={() => setOpenValueMapId(null)} className="w-full sm:w-auto px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-black active:scale-95 transition-all">
-                   {t.save}
-                </button>
-             </div>
-          </div>
-        </div>
+        <ValueMappingModal
+          openValueMapId={openValueMapId}
+          activeLayer={activeLayer}
+          activeMapping={activeMapping}
+          uniqueValues={uniqueValues}
+          t={t}
+          onClose={() => setOpenValueMapId(null)}
+          onUpdateValueMapping={updateValueMapping}
+        />
       )}
 
       {/* STEP 4: TRANSFORM & EXPORT */}
-      <section className={`transition-all duration-500 ${mappedLayerCount === 0 ? 'opacity-30 grayscale pointer-events-none' : 'opacity-100'}`}>
-         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 space-y-6">
-               
-               {/* Primary: Transform in browser */}
-               <div className="bg-white rounded-[40px] shadow-sm overflow-hidden border border-slate-200">
-                  <div className="p-8 md:p-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
-                     <div className="flex items-center gap-6">
-                        <div className={`w-16 h-16 rounded-[24px] flex items-center justify-center shadow-2xl transition-all shrink-0 ${transformStatus === 'done' ? 'bg-emerald-500 text-white shadow-emerald-200' : transformStatus === 'error' ? 'bg-rose-500 text-white shadow-rose-200' : 'bg-indigo-600 text-white shadow-indigo-200'}`}>
-                           {transformStatus === 'done' ? <Check size={32} /> : transformStatus === 'running' ? <RefreshCw size={32} className="animate-spin" /> : <Play size={28} />}
-                        </div>
-                        <div>
-                           <h3 className="text-lg md:text-xl font-black text-slate-800 tracking-tight leading-none mb-1">{t.mapper?.step4 || '4. Transformer'}</h3>
-                           <p className="text-xs text-slate-500 font-medium">
-                              {transformStatus === 'done' 
-                                ? `GeoPackage klar — ${formatFileSize(transformedBlob?.size || 0)}`
-                                : transformStatus === 'running' ? 'Transformerer med GDAL...'
-                                : transformStatus === 'error' ? transformError
-                                : sourceFiles.length > 0 ? 'Kjør ogr2ogr i nettleseren via WebAssembly' : 'Last opp en kildefil først'
-                              }
-                           </p>
-                        </div>
-                     </div>
-                     
-                     {transformStatus !== 'done' && (
-                       <button 
-                         onClick={handleTransform}
-                         disabled={transformStatus === 'running' || sourceFiles.length === 0 || mappedLayerCount === 0}
-                         className="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.15em] flex items-center justify-center gap-3 shadow-2xl shadow-indigo-200 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
-                       >
-                         {transformStatus === 'running' ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
-                         {transformStatus === 'running' ? 'Transformerer...' : 'Transformer'}
-                       </button>
-                     )}
-                  </div>
-
-                  {/* Transform result actions */}
-                  {transformStatus === 'done' && transformedBlob && (
-                    <div className="px-8 md:px-10 pb-8 md:pb-10 flex flex-col sm:flex-row gap-4">
-                       <button 
-                         onClick={handleDownloadGpkg}
-                         className="flex-1 flex items-center justify-center gap-3 px-6 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.15em] shadow-xl shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition-all"
-                       >
-                         <Download size={18} /> Last ned GeoPackage
-                       </button>
-                       {onTransformedData && (
-                         <button 
-                           onClick={handleSendToPublish}
-                           className="flex-1 flex items-center justify-center gap-3 px-6 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.15em] shadow-xl shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all"
-                         >
-                           <ArrowRight size={18} /> Send til QuickPublish
-                         </button>
-                       )}
-                       <button 
-                         onClick={() => { setTransformStatus('idle'); setTransformedBlob(null); }}
-                         className="px-6 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-[0.15em] hover:bg-slate-200 active:scale-95 transition-all"
-                       >
-                         <RefreshCw size={18} />
-                       </button>
-                    </div>
-                  )}
-
-                  {/* Transform error retry */}
-                  {transformStatus === 'error' && (
-                    <div className="px-8 md:px-10 pb-8 md:pb-10">
-                       <div className="flex items-center gap-3 bg-rose-50 text-rose-700 px-6 py-3 rounded-2xl border border-rose-100 text-xs font-bold">
-                         <AlertTriangle size={16} /> {transformError || 'Transformasjon feilet'}
-                       </div>
-                    </div>
-                  )}
-               </div>
-
-               {/* Secondary: ogr2ogr script (collapsible) */}
-               <div className="bg-slate-900 rounded-[40px] shadow-2xl overflow-hidden border border-slate-800">
-                  <button 
-                    onClick={() => setShowScript(!showScript)}
-                    className="w-full px-8 py-6 flex items-center justify-between text-left hover:bg-slate-800/60 transition-colors"
-                  >
-                     <div className="flex items-center gap-4">
-                        <Terminal size={20} className="text-slate-500" />
-                        <div>
-                           <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{t.mapper?.copyScript || 'ogr2ogr-kommando'}</span>
-                           <p className="text-[10px] text-slate-600 font-medium mt-0.5">For bruk i terminal eller CI/CD-pipeline</p>
-                        </div>
-                     </div>
-                     <ChevronDown size={18} className={`text-slate-500 transition-transform ${showScript ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {showScript && (
-                    <>
-                      <div className="px-8 py-4 border-t border-slate-800 bg-slate-800/80 flex flex-col sm:flex-row gap-4">
-                         <div className="flex flex-col sm:flex-row gap-4 flex-1">
-                            <button 
-                              onClick={() => setTargetType('gpkg')} 
-                              className={`flex-1 flex items-center justify-center gap-3 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${targetType === 'gpkg' ? 'bg-indigo-600 text-white shadow-xl' : 'bg-slate-900 text-slate-500 hover:text-slate-300'}`}
-                            >
-                              <Database size={16}/> GeoPackage
-                            </button>
-                            <button 
-                              onClick={() => setTargetType('postgis')} 
-                              className={`flex-1 flex items-center justify-center gap-3 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${targetType === 'postgis' ? 'bg-blue-600 text-white shadow-xl' : 'bg-slate-900 text-slate-500 hover:text-slate-300'}`}
-                            >
-                              <Server size={16}/> PostGIS
-                            </button>
-                         </div>
-                         <button 
-                           onClick={copyToClipboard}
-                           className={`px-6 py-3 rounded-2xl transition-all font-black text-[10px] uppercase tracking-[0.15em] flex items-center justify-center gap-3 active:scale-95 ${copied ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300 hover:text-white'}`}
-                         >
-                           {copied ? <Check size={16} /> : <Copy size={16} />}
-                           {copied ? t.copied : t.mapper?.copyScript || 'Kopier'}
-                         </button>
-                      </div>
-
-                      {targetType === 'postgis' && (
-                        <div className="px-8 py-4 bg-slate-800/60 border-t border-slate-800 grid grid-cols-2 sm:grid-cols-3 gap-4">
-                           {[
-                             { label: 'Host', key: 'host' },
-                             { label: 'Port', key: 'port' },
-                             { label: 'Database', key: 'dbname' },
-                             { label: 'User', key: 'user' },
-                             { label: 'Password', key: 'password', type: 'password' },
-                             { label: 'Schema', key: 'schema' }
-                           ].map(f => (
-                             <div key={f.key} className="space-y-1.5">
-                                <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{f.label}</label>
-                                <input 
-                                  type={f.type || "text"} 
-                                  value={(pgConfig as any)[f.key]} 
-                                  onChange={e => setPgConfig({...pgConfig, [f.key]: e.target.value})} 
-                                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-[11px] text-white outline-none focus:border-blue-500" 
-                                />
-                             </div>
-                           ))}
-                        </div>
-                      )}
-
-                      <div className="p-8 md:p-10 font-mono text-[10px] md:text-xs text-indigo-100 leading-relaxed whitespace-pre-wrap break-all bg-black/40 overflow-y-auto max-h-[400px] custom-scrollbar select-all selection:bg-rose-500/30 border-t border-slate-800">
-                         {mappedLayerCount > 0 ? generateOgrCommand() : <p className="opacity-20 italic text-center py-20 uppercase font-black tracking-widest">{t.mapper?.mapOneHint || 'Map minst ett lag først'}</p>}
-                      </div>
-                      
-                      <div className="p-8 bg-slate-800/40 border-t border-slate-700 grid grid-cols-1 sm:grid-cols-2 gap-8">
-                         <div className="space-y-4">
-                            <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-500">{t.mapper?.explanation?.title || 'Forklaring'}</h5>
-                            <div className="space-y-1.5">
-                               <p className="text-[9px] font-bold text-slate-500 uppercase"><span className="text-rose-400">-f:</span> {t.mapper?.explanation?.f || 'Output-format'}</p>
-                               <p className="text-[9px] font-bold text-slate-500 uppercase"><span className="text-rose-400">-nln:</span> {t.mapper?.explanation?.nln || 'Nytt lagnavn'}</p>
-                               <p className="text-[9px] font-bold text-slate-500 uppercase"><span className="text-rose-400">-sql:</span> {t.mapper?.explanation?.sql || 'SQL-spørring for feltmapping'}</p>
-                            </div>
-                         </div>
-                         <div className="space-y-4">
-                            <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-500">{t.mapper?.howToRun || 'Slik kjører du'}</h5>
-                            <p className="text-[9px] font-bold text-slate-500 leading-relaxed uppercase">{t.mapper?.howToRunDesc || 'Installer GDAL og kjør kommandoen i terminalen.'}</p>
-                         </div>
-                      </div>
-                    </>
-                  )}
-               </div>
-            </div>
-
-            <div className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm space-y-8 h-fit sticky top-8">
-               <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 border border-indigo-100 shrink-0"><Settings2 size={24}/></div>
-                  <h4 className="text-sm font-black text-slate-800 uppercase tracking-widest">ETL Engine</h4>
-               </div>
-               
-               <div className="space-y-6">
-                  <div className="space-y-2">
-                     <div className="flex items-center gap-2 text-indigo-700">
-                        <Shield size={16} />
-                        <h5 className="text-[10px] font-black uppercase tracking-widest">{targetType === 'postgis' ? (t.mapper?.dbMigration || 'Database-migrering') : (t.mapper?.simpleFileMig || 'Filkonvertering')}</h5>
-                     </div>
-                     <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                        {targetType === 'postgis' ? (t.mapper?.postgisAdvantage || 'Direkte til PostGIS') : (t.mapper?.gpkgAdvantage || 'Alt kjøres i nettleseren via GDAL WebAssembly — ingen installasjon nødvendig.')}
-                     </p>
-                  </div>
-                  
-                  <div className="space-y-2">
-                     <div className="flex items-center gap-2 text-emerald-700">
-                        <Globe size={16} />
-                        <h5 className="text-[10px] font-black uppercase tracking-widest">Støttede formater</h5>
-                     </div>
-                     <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                        GeoPackage, Shapefile, GeoJSON, GML, KML, FlatGeobuf, CSV, GPX, MapInfo TAB, DXF, og mange flere via GDAL.
-                     </p>
-                  </div>
-               </div>
-
-               <div className="pt-4 border-t border-slate-100">
-                  <a href="https://gdal.org/programs/ogr2ogr.html" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-amber-600 hover:text-amber-700 transition-colors group">
-                    Official OGR Documentation
-                    <ExternalLink size={14} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-                  </a>
-               </div>
-            </div>
-         </div>
-      </section>
+      <TransformPanel
+        model={model}
+        mappings={mappings}
+        mappedLayerCount={mappedLayerCount}
+        sourceFiles={sourceFiles}
+        sourceGeomColumns={sourceGeomColumns}
+        sourceUrl={sourceUrl}
+        sourceFilename={sourceFilename}
+        onTransformedData={onTransformedData}
+        t={t}
+      />
     </div>
   );
 };

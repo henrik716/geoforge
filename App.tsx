@@ -14,12 +14,15 @@ import Header from './components/Header';
 import MobileNav from './components/MobileNav';
 import { ConfirmDeleteDialog, GithubImportDialog, UrlImportDialog } from './components/dialogs';
 import { useHistory } from './hooks/useHistory';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { usePanelResize } from './hooks/usePanelResize';
+import { usePersistedState } from './hooks/usePersistedState';
+import { useWindowWidth } from './hooks/useWindowWidth';
 import {
   processGeoJsonToModel,
   processOpenApiToModel,
   processOgcCollectionsToModel,
   processSqlToModel,
-  processGpkgFile,
   processAnyFile,
   InferredDataSummary,
 } from './utils/importUtils';
@@ -36,24 +39,13 @@ const App: React.FC = () => {
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
-  
-  // Right Panel Resizing States
-  const [previewWidth, setPreviewWidth] = useState(400);
-  const [isResizingPreview, setIsResizingPreview] = useState(false);
-  const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
-  
-  const [models, setModels] = useState<DataModel[]>(() => {
-    const saved = localStorage.getItem('models');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [baselineModels, setBaselineModels] = useState<Record<string, DataModel>>(() => {
-    const saved = localStorage.getItem('baselineModels');
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [githubConfig, setGithubConfig] = useState(() => {
-    const saved = localStorage.getItem('githubConfig');
-    return saved ? JSON.parse(saved) : { token: '', repo: '', path: '', branch: 'main' };
-  });
+
+  const { previewWidth, isResizingPreview, setIsResizingPreview } = usePanelResize();
+  const { isDesktop } = useWindowWidth();
+
+  const [models, setModels] = usePersistedState<DataModel[]>('models', []);
+  const [baselineModels, setBaselineModels] = usePersistedState<Record<string, DataModel>>('baselineModels', {});
+  const [githubConfig, setGithubConfig] = usePersistedState('githubConfig', { token: '', repo: '', path: '', branch: 'main' });
 
   const { pushToHistory, undo, redo, historyIndex, historyLength } = useHistory(models);
 
@@ -66,63 +58,12 @@ const App: React.FC = () => {
   const [isParsingGpkg, setIsParsingGpkg] = useState(false);
   const [transformedData, setTransformedData] = useState<{ blob: Blob; filename: string } | null>(null);
 
-  const isDesktop = windowWidth >= 1024;
-
-  // Track window resize for responsive checks
-  useEffect(() => {
-    const handleResize = () => setWindowWidth(window.innerWidth);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-        if (e.shiftKey) handleRedo(); else handleUndo();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') handleRedo();
-      if ((e.ctrlKey || e.metaKey) && e.key === 'b') setSidebarCollapsed(prev => !prev);
-      if ((e.ctrlKey || e.metaKey) && e.key === 'j') setPreviewCollapsed(prev => !prev);
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+  useKeyboardShortcuts({
+    onUndo: () => { const prev = undo(); if (prev) { setModels(prev); setDirty(false); } },
+    onRedo: () => { const next = redo(); if (next) { setModels(next); setDirty(false); } },
+    onToggleSidebar: () => setSidebarCollapsed(prev => !prev),
+    onTogglePreview: () => setPreviewCollapsed(prev => !prev),
   }, [historyIndex, historyLength]);
-
-  // Handle Drag Resizing for the Right Panel
-  useEffect(() => {
-    const handleResizePreview = (e: MouseEvent) => {
-      if (isResizingPreview) {
-        const newWidth = window.innerWidth - e.clientX;
-        // Keep the width between 300px and 60% of the screen
-        if (newWidth >= 300 && newWidth <= Math.max(800, window.innerWidth * 0.6)) {
-          setPreviewWidth(newWidth);
-        }
-      }
-    };
-
-    const stopResizingPreview = () => {
-      setIsResizingPreview(false);
-    };
-
-    if (isResizingPreview) {
-      window.addEventListener('mousemove', handleResizePreview);
-      window.addEventListener('mouseup', stopResizingPreview);
-      document.body.style.userSelect = 'none'; // Prevent text selection while dragging
-    } else {
-      document.body.style.userSelect = '';
-    }
-
-    return () => {
-      window.removeEventListener('mousemove', handleResizePreview);
-      window.removeEventListener('mouseup', stopResizingPreview);
-      document.body.style.userSelect = '';
-    };
-  }, [isResizingPreview]);
-
-  // Persist state
-  useEffect(() => { localStorage.setItem('models', JSON.stringify(models)); }, [models]);
-  useEffect(() => { localStorage.setItem('baselineModels', JSON.stringify(baselineModels)); }, [baselineModels]);
-  useEffect(() => { localStorage.setItem('githubConfig', JSON.stringify(githubConfig)); }, [githubConfig]);
 
   const selectedModel = models.find(m => m.id === selectedId);
 
@@ -132,16 +73,6 @@ const App: React.FC = () => {
       validateForDeploy(selectedModel);
     }
   }, [activeTab, selectedModel]);
-
-  const handleUndo = () => {
-    const prevModels = undo();
-    if (prevModels) { setModels(prevModels); setDirty(false); }
-  };
-
-  const handleRedo = () => {
-    const nextModels = redo();
-    if (nextModels) { setModels(nextModels); setDirty(false); }
-  };
 
   const handleNewModel = () => {
     const m = createEmptyModel();

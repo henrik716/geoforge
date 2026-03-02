@@ -1,0 +1,164 @@
+import React, { useState } from 'react';
+import { X, ArrowRight } from 'lucide-react';
+import { DataModel, ModelMetadata } from '../../types';
+import { InferredDataSummary } from '../../utils/importUtils';
+
+interface MetadataStepProps {
+  model: DataModel;
+  summary: InferredDataSummary;
+  onUpdateModel: (model: DataModel) => void;
+  onBack: () => void;
+  onNext: () => void;
+  t: any;
+}
+
+const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateModel, onBack, onNext, t }) => {
+  const q = t.quickPublish || {};
+  const md = t.metadata || {};
+
+  const meta: ModelMetadata = model.metadata || {
+    contactName: '', contactEmail: '', contactOrganization: '',
+    keywords: [], theme: '', license: 'CC-BY-4.0', accessRights: 'public',
+    purpose: '', accrualPeriodicity: 'unknown',
+    spatialExtent: {
+      westBoundLongitude: summary.bbox?.west?.toString() || '',
+      eastBoundLongitude: summary.bbox?.east?.toString() || '',
+      southBoundLatitude: summary.bbox?.south?.toString() || '',
+      northBoundLatitude: summary.bbox?.north?.toString() || '',
+    },
+    temporalExtentFrom: '', temporalExtentTo: '',
+  };
+
+  const updateMeta = (partial: Partial<ModelMetadata>) => {
+    onUpdateModel({ ...model, metadata: { ...meta, ...partial } });
+  };
+
+  const [kwInput, setKwInput] = useState('');
+  const addKeyword = () => {
+    const kw = kwInput.trim();
+    if (kw && !meta.keywords.includes(kw)) {
+      updateMeta({ keywords: [...meta.keywords, kw] });
+    }
+    setKwInput('');
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400">
+      <div className="space-y-2">
+        <h2 className="text-2xl font-black tracking-tight text-slate-900">{q.step2Title}</h2>
+        <p className="text-sm text-slate-400 font-medium">{q.step2Desc}</p>
+      </div>
+
+      {/* Dataset name */}
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{t.modelName}</label>
+        <input
+          value={model.name}
+          onChange={e => onUpdateModel({ ...model, name: e.target.value })}
+          className="w-full bg-white border-2 border-slate-200 rounded-2xl px-5 py-3.5 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all"
+        />
+      </div>
+
+      {/* Description */}
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{t.descriptionPlaceholder?.split('...')[0] || 'Beskrivelse'}</label>
+        <textarea
+          value={model.description}
+          onChange={e => onUpdateModel({ ...model, description: e.target.value })}
+          placeholder={t.descriptionPlaceholder}
+          rows={2}
+          className="w-full bg-white border-2 border-slate-200 rounded-2xl px-5 py-3.5 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all resize-none"
+        />
+      </div>
+
+      {/* Contact */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.contactName}</label>
+          <input value={meta.contactName} onChange={e => updateMeta({ contactName: e.target.value })} placeholder={md.contactNamePlaceholder} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.contactEmail}</label>
+          <input value={meta.contactEmail} onChange={e => updateMeta({ contactEmail: e.target.value })} placeholder={md.contactEmailPlaceholder} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.contactOrganization}</label>
+          <input value={meta.contactOrganization} onChange={e => updateMeta({ contactOrganization: e.target.value })} placeholder={md.contactOrganizationPlaceholder} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" />
+        </div>
+      </div>
+
+      {/* Dataset URLs */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.datasetUrl}</label>
+          <input
+            type="url"
+            value={meta.url || ''}
+            onChange={e => updateMeta({ url: e.target.value })}
+            placeholder={md.datasetUrlPlaceholder}
+            className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.termsOfService}</label>
+          <input
+            type="url"
+            value={meta.termsOfService || ''}
+            onChange={e => updateMeta({ termsOfService: e.target.value })}
+            placeholder={md.termsOfServicePlaceholder}
+            className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all"
+          />
+        </div>
+      </div>
+
+      {/* Theme + License */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.theme}</label>
+          <select value={meta.theme} onChange={e => updateMeta({ theme: e.target.value })} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold appearance-none outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all cursor-pointer">
+            <option value="">—</option>
+            {Object.entries(md.themes || {}).map(([k, v]) => <option key={k} value={k}>{String(v)}</option>)}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.license}</label>
+          <select value={meta.license} onChange={e => updateMeta({ license: e.target.value })} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold appearance-none outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all cursor-pointer">
+            {Object.entries(md.licenses || {}).map(([k, v]) => <option key={k} value={k}>{String(v)}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Keywords */}
+      <div className="space-y-2">
+        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.keywords}</label>
+        <div className="flex flex-wrap gap-2 min-h-[40px]">
+          {meta.keywords.map((kw, i) => (
+            <span key={i} className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold">
+              {kw}
+              <button onClick={() => updateMeta({ keywords: meta.keywords.filter((_, j) => j !== i) })} className="hover:text-red-500 transition-colors"><X size={12} /></button>
+            </span>
+          ))}
+          <input
+            value={kwInput}
+            onChange={e => setKwInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addKeyword(); } }}
+            placeholder={md.keywordsPlaceholder}
+            className="flex-1 min-w-[160px] bg-transparent text-sm font-medium outline-none placeholder:text-slate-300"
+          />
+        </div>
+      </div>
+
+      {/* Navigation */}
+      <div className="flex items-center justify-between pt-4">
+        <button onClick={onBack} className="px-6 py-3 rounded-2xl border-2 border-slate-200 text-slate-500 font-black text-xs uppercase tracking-widest hover:bg-slate-50 active:scale-95 transition-all">
+          {q.back}
+        </button>
+        <button onClick={onNext} className="px-8 py-3.5 rounded-2xl bg-slate-900 text-white font-black text-xs uppercase tracking-[0.15em] hover:bg-slate-800 active:scale-95 transition-all shadow-lg flex items-center gap-2">
+          {q.next} <ArrowRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default MetadataStep;

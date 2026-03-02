@@ -56,7 +56,7 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ model, t }) => {
     const hasGeom = layer.geometryType !== 'None';
     const geomRows = hasGeom ? 1 : 0;
     
-    // Kalkuler høyde basert på om geometriraden skal være med
+    // Calculate height based on whether geometry row is included
     const layerH = mainBoxHeaderH + (geomRows + Math.max(0, flatProps.length)) * rowH + 16;
     const layerY = currentY;
     const visuals = {
@@ -71,7 +71,7 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ model, t }) => {
 
     flatProps.forEach((flatItem, propIdx) => {
         const { prop } = flatItem;
-        // sourceY beregnes nå med dynamisk offset (geomRows)
+        // sourceY with dynamic offset for geometry rows
         const sourceY = layerY + mainBoxHeaderH + (propIdx + geomRows) * rowH + rowH/2;
 
         if (prop.type === 'codelist' && prop.codelistMode === 'inline' && prop.codelistValues.length > 0) {

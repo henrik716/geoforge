@@ -1,29 +1,12 @@
 import { DataModel, Layer, ModelProperty, PropertyType, GeometryType, PropertyConstraints, ImportWarning, ImportError, ImportValidationResult } from '../types';
 import { createEmptyModel, createEmptyProperty, createEmptyLayer } from '../constants';
+import { normalizeGeometryType } from './geomUtils';
+import { mapSqlTypeToPropertyType } from './typeMapUtils';
+
+export { normalizeGeometryType } from './geomUtils';
+export { mapSqlTypeToPropertyType } from './typeMapUtils';
 
 declare var initSqlJs: any;
-
-export const normalizeGeometryType = (type: string): GeometryType => {
-  const t = type.toLowerCase();
-  if (t.includes('multipolygon')) return 'MultiPolygon';
-  if (t.includes('multilinestring')) return 'MultiLineString';
-  if (t.includes('multipoint')) return 'MultiPoint';
-  if (t.includes('polygon')) return 'Polygon';
-  if (t.includes('linestring')) return 'LineString';
-  if (t.includes('point')) return 'Point';
-  if (t.includes('collection')) return 'GeometryCollection';
-  return 'Polygon'; 
-};
-
-export const mapSqlTypeToPropertyType = (type: string): PropertyType => {
-  const tLower = type.toLowerCase();
-  if (tLower.includes('int')) return 'integer';
-  if (tLower.includes('double') || tLower.includes('float') || tLower.includes('real') || tLower.includes('numeric')) return 'number';
-  if (tLower.includes('bool') || tLower.includes('boolean')) return 'boolean';
-  if (tLower.includes('date') || tLower.includes('time') || tLower.includes('timestamp')) return 'date';
-  if (tLower.includes('geom') || tLower.includes('point') || tLower.includes('line') || tLower.includes('poly') || tLower.includes('shape')) return 'geometry';
-  return 'string';
-};
 
 export const processGeoJsonToModel = (json: any, name: string): DataModel => {
   const newModel = createEmptyModel();
@@ -256,12 +239,10 @@ export const validateGeoPackageIdFields = async (
   tableName: string,
   primaryKeyColumn: string
 ): Promise<ImportWarning[]> => {
-  console.log('🔍 VALIDATION CALLED for:', tableName, 'with PK:', primaryKeyColumn);
   const warnings: ImportWarning[] = [];
 
   // Check if primary key is actually a primary key constraint
   const columnsRes = db.exec(`PRAGMA table_info("${tableName}")`);
-  console.log('🔍 COLUMNS DEBUG:', columnsRes);
   let foundPkColumn = false;
   let pkColumnType = '';
   let pkHasNulls = false;
@@ -272,19 +253,14 @@ export const validateGeoPackageIdFields = async (
       const type = col[2];
       const notNull = col[3] === 1;
       const isPk = col[5] === 1;
-      console.log('🔍 COLUMN DEBUG:', { name, type, notNull, isPk });
-
       if (name === primaryKeyColumn) {
         foundPkColumn = isPk;
         pkColumnType = type.toLowerCase();
-        console.log('🔍 PK COLUMN FOUND:', { foundPkColumn, pkColumnType });
-        
         // Check for NULL values in primary key column
         try {
           const nullCheckRes = db.exec(`SELECT COUNT(*) FROM "${tableName}" WHERE "${primaryKeyColumn}" IS NULL`);
           if (nullCheckRes.length > 0 && Number(nullCheckRes[0].values[0][0]) > 0) {
             pkHasNulls = true;
-            console.log('🔍 NULL VALUES FOUND');
           }
         } catch {
           // Ignore errors in NULL check
@@ -347,7 +323,6 @@ export const validateGeoPackageIdFields = async (
     // Ignore errors in duplicate check
   }
 
-  console.log('🔍 FINAL WARNINGS:', warnings);
   return warnings;
 };
 
@@ -411,22 +386,16 @@ export const processGpkgFile = async (file: File): Promise<{
 
       // Find primary key column
       let primaryKeyColumn = 'fid';
-      console.log('🔍 PK DETECTION DEBUG - columnsRes:', columnsRes);
       if (columnsRes.length > 0) {
-        console.log('🔍 PK DETECTION DEBUG - columns:', columnsRes[0].values);
         for (const col of columnsRes[0].values) {
           const name = col[1];
           const isPk = col[5] === 1;
-          console.log('🔍 PK DETECTION DEBUG - column:', { name, isPk, colIndex5: col[5] });
           if (isPk) {
             primaryKeyColumn = name;
-            console.log('🔍 PK DETECTION DEBUG - FOUND PK:', primaryKeyColumn);
             break;
           }
         }
       }
-      console.log('🔍 PK DETECTION DEBUG - FINAL primaryKeyColumn:', primaryKeyColumn);
-
       if (columnsRes.length > 0) {
         columnsRes[0].values.forEach((col: any) => {
           const name = col[1];
@@ -471,7 +440,6 @@ export const processGpkgFile = async (file: File): Promise<{
   for (const layerSummary of layerSummaries) {
     try {
       const warnings = await validateGeoPackageIdFields(db, layerSummary.tableName, layerSummary.primaryKeyColumn);
-      console.log('🔍 LAYER VALIDATION RESULT:', { tableName: layerSummary.tableName, warnings });
       allWarnings.push(...warnings);
     } catch (error) {
       allErrors.push({
@@ -489,8 +457,6 @@ export const processGpkgFile = async (file: File): Promise<{
     isValid: allErrors.length === 0 && allWarnings.filter(w => w.severity === 'error').length === 0,
     canProceed: allErrors.length === 0
   };
-
-  console.log('🔍 FINAL VALIDATION RESULT:', validation);
 
   db.close();
 
@@ -519,14 +485,12 @@ export const processGpkgFile = async (file: File): Promise<{
 export const processAnyFile = async (
   files: File | File[]
 ): Promise<{ model: DataModel; summary: InferredDataSummary; validation: ImportValidationResult }> => {
-  console.log('🔍 processAnyFile CALLED with files:', files);
   const fileArray = Array.isArray(files) ? files : [files];
   const mainFile = fileArray[0];
   const ext = mainFile.name.split('.').pop()?.toLowerCase() || '';
 
   // Try GDAL first (handles all formats)
   try {
-    console.log('🔍 Trying GDAL import...');
     const { processFilesWithGdal } = await import('./gdalService');
     return await processFilesWithGdal(fileArray);
   } catch (gdalErr) {
@@ -535,7 +499,6 @@ export const processAnyFile = async (
 
   // Fallback: GeoPackage via sql.js
   if (ext === 'gpkg') {
-    console.log('🔍 Using processGpkgFile fallback...');
     return processGpkgFile(mainFile);
   }
 
