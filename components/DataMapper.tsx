@@ -70,31 +70,87 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t, onTransformedData }) 
   };
   const currentStep = getStep();
 
-  const processGeoJsonData = (json: any) => {
-    let fields: string[] = [];
-    let values: Record<string, Set<string>> = {};
-    
-    const features = json.features || (Array.isArray(json) ? json : []);
-    if (features.length > 0) {
-      const first = (features[0].properties || features[0]);
-      fields = Object.keys(first);
+  const processGeoJsonDataWithGdal = async (json: any, filename: string) => {
+    try {
+      const jsonBlob = new Blob([JSON.stringify(json)], { type: 'application/json' });
+      const tempFile = new File([jsonBlob], filename, { type: 'application/json' });
+      setSourceFiles([tempFile]);
       
-      features.slice(0, 100).forEach((f: any) => {
-         const p = f.properties || f;
-         fields.forEach(field => {
-            if (!values[field]) values[field] = new Set();
-            if (p[field] !== undefined && p[field] !== null) values[field].add(String(p[field]));
-         });
+      const { model: sourceModel } = await processAnyFile(tempFile);
+
+      const layers: string[] = [];
+      const fieldsMap: Record<string, string[]> = {};
+      const valuesMap: Record<string, Record<string, string[]>> = {};
+      const geomColMap: Record<string, string> = {};
+
+      sourceModel.layers.forEach(layer => {
+        layers.push(layer.name);
+        fieldsMap[layer.name] = layer.properties.map(p => p.name);
+        valuesMap[layer.name] = {};
+        geomColMap[layer.name] = layer.geometryColumnName || 'geometry';
       });
+
+      const features = json.features || (Array.isArray(json) ? json : []);
+      if (features.length > 0 && layers.length > 0) {
+        for (const layerName of layers) {
+          const fields = fieldsMap[layerName] || [];
+          const valSets: Record<string, Set<string>> = {};
+          fields.forEach(f => valSets[f] = new Set());
+
+          features.slice(0, 100).forEach((f: any) => {
+            const p = f.properties || f;
+            fields.forEach(field => {
+              if (p[field] !== undefined && p[field] !== null) {
+                valSets[field].add(String(p[field]));
+              }
+            });
+          });
+          
+          Object.keys(valSets).forEach(k => {
+            valuesMap[layerName][k] = Array.from(valSets[k]);
+          });
+        }
+      }
+
+      setSourceLayers(layers);
+      setAllFields(fieldsMap);
+      setSourceGeomColumns(geomColMap);
+      setUniqueValues(valuesMap);
+      setMappings({});
+
+    } catch (err) {
+      console.warn('GDAL processing failed for URL GeoJSON, falling back to simple processing:', err);
+      
+      let fields: string[] = [];
+      let values: Record<string, Set<string>> = {};
+      
+      const features = json.features || (Array.isArray(json) ? json : []);
+      if (features.length > 0) {
+        const first = (features[0].properties || features[0]);
+        fields = Object.keys(first);
+        
+        features.slice(0, 100).forEach((f: any) => {
+           const p = f.properties || f;
+           fields.forEach(field => {
+              if (!values[field]) values[field] = new Set();
+              if (p[field] !== undefined && p[field] !== null) values[field].add(String(p[field]));
+           });
+        });
+      }
+      
+      const jsonBlob = new Blob([JSON.stringify(json)], { type: 'application/json' });
+      const tempFile = new File([jsonBlob], filename, { type: 'application/json' });
+      setSourceFiles([tempFile]);
+      
+      setSourceLayers(['default']);
+      setAllFields({ 'default': fields });
+      setSourceGeomColumns({ 'default': 'geometry' });
+      setUniqueValues({ 'default': Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Array.from(v)])) });
+      setMappings({});
     }
-    setSourceLayers(['default']);
-    setAllFields({ 'default': fields });
-    setSourceGeomColumns({ 'default': 'geometry' });
-    setUniqueValues({ 'default': Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Array.from(v)])) });
-    setMappings({});
   };
 
- const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const allFiles = Array.from(e.target.files || []);
@@ -192,8 +248,9 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t, onTransformedData }) 
       const response = await fetch(sourceUrl);
       if (!response.ok) throw new Error("Fetch failed");
       const json = await response.json();
-      setSourceFilename(sourceUrl.split('/').pop()?.split('?')[0] || "API Data");
-      processGeoJsonData(json);
+      const filename = sourceUrl.split('/').pop()?.split('?')[0] || "API Data";
+      setSourceFilename(filename);
+      await processGeoJsonDataWithGdal(json, filename);
       setShowUrlInput(false);
     } catch (err) {
       alert(t.fetchError);
@@ -328,21 +385,23 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t, onTransformedData }) 
       const { getGdal } = await import('../utils/gdalService');
       const Gdal = await getGdal();
 
-      // Open source files
+      // Open all source files (may be multiple if split by geometry type)
       const openResult = await Gdal.open(sourceFiles);
       if (!openResult.datasets || openResult.datasets.length === 0) {
         throw new Error('Kunne ikke åpne kildefilen');
       }
-      const dataset = openResult.datasets[0];
 
-      // Build ogr2ogr calls from mappings (same SQL logic as generateOgrCommand)
-      let finalBlob: Blob | null = null;
+      const vfsOutputPath = `/vsimem/export_${Date.now()}.gpkg`;
+      let isFirstLayer = true;
 
       for (const [layerId, m] of Object.entries(mappings)) {
         const mapping = m as LayerMapping;
         if (!mapping.sourceLayer) continue;
         const modelLayer = model.layers.find(l => l.id === layerId);
         if (!modelLayer) continue;
+
+        // Use the first dataset (all layers should be accessible from any opened dataset)
+        const dataset = openResult.datasets[0];
 
         const targetLayerName = modelLayer.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
         const selectFields = modelLayer.properties
@@ -361,9 +420,11 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t, onTransformedData }) 
             return `"${sourceF}" AS "${p.name}"`;
           });
 
-        const geomCol = modelLayer.geometryColumnName || 'geometri';
-        const sourceGeomCol = sourceGeomColumns[mapping.sourceLayer] || 'geometry';
-        const sql = `SELECT ${selectFields.length > 0 ? selectFields.join(', ') + ', ' : ''}"${sourceGeomCol}" FROM "${mapping.sourceLayer}"`;
+        const geomCol = modelLayer.geometryColumnName || 'geometry';
+        const sql = selectFields.length > 0 
+          ? `SELECT ${selectFields.join(', ')} FROM "${mapping.sourceLayer}"`
+          : `SELECT * FROM "${mapping.sourceLayer}"`;
+
         const opts: string[] = [
           '-f', 'GPKG',
           '-nln', targetLayerName,
@@ -371,16 +432,28 @@ const DataMapper: React.FC<DataMapperProps> = ({ model, t, onTransformedData }) 
           '-sql', sql,
           '-lco', `GEOMETRY_NAME=${geomCol}`,
         ];
-        if (finalBlob) opts.push('-update', '-append');
 
-        const output = await Gdal.ogr2ogr(dataset, opts);
-        const bytes = await Gdal.getFileBytes(output);
-        finalBlob = new Blob([bytes], { type: 'application/geopackage+sqlite3' });
+        if (!isFirstLayer) {
+          opts.push('-update', '-append');
+        }
+
+        opts.push(vfsOutputPath);
+        await Gdal.ogr2ogr(dataset, opts);
+        isFirstLayer = false;
       }
 
-      Gdal.close(dataset);
+      // Close all datasets
+      for (const ds of openResult.datasets) {
+        try {
+          Gdal.close(ds);
+        } catch (e) {
+          // Ignore close errors
+        }
+      }
 
-      if (finalBlob) {
+      if (!isFirstLayer) {
+        const bytes = await Gdal.getFileBytes(vfsOutputPath);
+        const finalBlob = new Blob([bytes], { type: 'application/geopackage+sqlite3' });
         setTransformedBlob(finalBlob);
         setTransformStatus('done');
       } else {
