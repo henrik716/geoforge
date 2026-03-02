@@ -792,11 +792,12 @@ export const generateEnvFile = (source: SourceConnection): string => {
 
   // FIX: QGIS Server needs QGIS_SERVER_SERVICE_URL so GetCapabilities advertises
   // the correct public HTTPS URL rather than the internal http:// address.
-  env += `\n# --- QGIS Server public URL (WMS) ---\n`;
+  // QGIS Server 3.x serves WMS/WFS/WCS at /ows/ by default.
+  env += `\n# --- QGIS Server public URL (WMS/WFS at /ows/) ---\n`;
   env += `# Set to the public-facing HTTPS URL for the QGIS Server service.\n`;
   env += `# Without this, GetCapabilities will advertise http:// behind an HTTPS proxy.\n`;
-  env += `# Railway: https://<qgis-service>.up.railway.app/qgis\n`;
-  env += `# Fly.io:  https://<slug>-qgis.fly.dev/qgis\n`;
+  env += `# Railway: https://<qgis-service>.up.railway.app/ows/\n`;
+  env += `# Fly.io:  https://<slug>-qgis.fly.dev/ows/\n`;
   env += `# Local:   leave blank (not needed)\n`;
   env += `QGIS_SERVER_PUBLIC_URL=\n`;
 
@@ -832,7 +833,8 @@ export const generateDockerCompose = (
 #   1. Copy .env.template to .env and fill in credentials
 #   2. docker compose up -d
 #   3. OGC API Features: http://localhost:5000
-#   4. Downloads:        http://localhost:\${DOWNLOAD_PORT:-8081}
+#   4. WMS/WFS (QGIS):   http://localhost:8080/ows/?SERVICE=WMS&REQUEST=GetCapabilities
+#   5. Downloads:        http://localhost:\${DOWNLOAD_PORT:-8081}
 
 services:
   # --- OGC API - Features (pygeoapi) ---
@@ -861,7 +863,10 @@ services:
   // WMS via QGIS Server (only if there are geometry layers)
   if (hasGeomLayers) {
     compose += `
-  # --- WMS (QGIS Server) ---
+  # --- WMS/WFS (QGIS Server) ---
+  # QGIS Server 3.x serves all OGC services at /ows/ by default.
+  # WMS GetCapabilities: http://localhost:8080/ows/?SERVICE=WMS&REQUEST=GetCapabilities
+  #
   # FIX: QGIS_SERVER_SERVICE_URL ensures GetCapabilities advertises the correct
   # public URL when running behind an HTTPS reverse proxy (Railway, Fly, nginx).
   # Set QGIS_SERVER_PUBLIC_URL in your .env file after first deploy.
@@ -956,7 +961,7 @@ export const generateReadme = (model: DataModel, source: SourceConnection): stri
   md += `|----------|------|-----|\n`;
   md += `| OGC API - Features (pygeoapi) | 5000 | http://localhost:5000 |\n`;
   if (hasWms) {
-    md += `| WMS (QGIS Server) | 8080 | http://localhost:8080/qgis?SERVICE=WMS&REQUEST=GetCapabilities |\n`;
+    md += `| WMS (QGIS Server) | 8080 | http://localhost:8080/ows/?SERVICE=WMS&REQUEST=GetCapabilities |\n`;
   }
   if (!isGpkg) {
     md += `| Delta Nedlastinger (Nginx) | 8081 | http://localhost:8081 |\n`;
@@ -1206,9 +1211,11 @@ ${isGpkg ? 'COPY data/ /data/' : ''}
 RUN chmod -R 777 /data
 
 ENV QGIS_PROJECT_FILE=/data/project.qgs
+# QGIS Server 3.x serves all OGC services (WMS, WFS, WCS, WMTS) at /ows/ by default.
 # FIX: QGIS_SERVER_SERVICE_URL is set at runtime via .env / Railway / Fly variables
 # so GetCapabilities advertises the correct public HTTPS URL.
-# Default is blank — QGIS Server falls back to request Host header (fine for local use).
+# Default is blank — QGIS Server falls back to the request Host header (fine for local use).
+# Example: https://<your-app>.up.railway.app/ows/
 ENV QGIS_SERVER_SERVICE_URL=
 EXPOSE 80
 `;
@@ -1292,8 +1299,9 @@ export const generateFlyQgisToml = (
 ): string => {
   const slug = model.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
-  return `# Fly.io configuration for ${model.name} — QGIS Server (WMS)
+  return `# Fly.io configuration for ${model.name} — QGIS Server (WMS/WFS)
 # Deploy as separate app: fly deploy --config fly.qgis.toml
+# QGIS Server 3.x serves all OGC services at /ows/ by default.
 
 app = "${slug}-qgis"
 primary_region = "ams"
@@ -1303,8 +1311,8 @@ primary_region = "ams"
 
 [env]
   # FIX: Pre-populated so GetCapabilities advertises the correct HTTPS URL.
-  # Update the /qgis path suffix if your QGIS Server is mounted differently.
-  QGIS_SERVER_SERVICE_URL = "https://${slug}-qgis.fly.dev/qgis"
+  # QGIS Server 3.x serves at /ows/ — update if you use a custom domain.
+  QGIS_SERVER_SERVICE_URL = "https://${slug}-qgis.fly.dev/ows/"
 
 [http_service]
   internal_port = 80
@@ -1358,9 +1366,9 @@ export const generateRailwayQgisJson = (
     "$schema": "https://railway.com/railway.schema.json",
     build: { builder: "DOCKERFILE", dockerfilePath: "Dockerfile.qgis" },
     deploy: {
-      // QGIS Server has no simple health endpoint — use WMS GetCapabilities.
-      // The long timeout is needed because QGIS loads the project on first request.
-      healthcheckPath: "/?SERVICE=WMS&REQUEST=GetCapabilities",
+      // QGIS Server 3.x serves at /ows/ — use that for the health check.
+      // Long timeout needed because QGIS loads the full project on first request.
+      healthcheckPath: "/ows/?SERVICE=WMS&REQUEST=GetCapabilities",
       healthcheckTimeout: 300,
       restartPolicyType: "ON_FAILURE",
       restartPolicyMaxRetries: 10
@@ -1543,12 +1551,12 @@ const generateReadmeForTarget = (
     'ghcr': 'GitHub Container Registry',
   };
 
-  // FIX: Target-aware WMS URL instead of hardcoded localhost:8080
+  // QGIS Server 3.x serves at /ows/ by default
   const wmsUrls: Record<DeployTarget, string> = {
-    'docker-compose': 'http://localhost:8080/qgis',
-    'fly': `https://${slug}-qgis.fly.dev/qgis`,
-    'railway': 'https://<qgis-service>.up.railway.app/qgis',
-    'ghcr': 'http://localhost:8080/qgis',
+    'docker-compose': 'http://localhost:8080/ows/',
+    'fly': `https://${slug}-qgis.fly.dev/ows/`,
+    'railway': 'https://<qgis-service>.up.railway.app/ows/',
+    'ghcr': 'http://localhost:8080/ows/',
   };
   const wmsUrl = wmsUrls[target];
 
@@ -1614,7 +1622,7 @@ const generateReadmeForTarget = (
     md += `|----------|-------|\n`;
     md += `| \`PYGEOAPI_SERVER_URL\` | \`https://<din-app>.up.railway.app\` (kopier fra Railway dashboard) |\n`;
     if (hasWms) {
-      md += `| \`QGIS_SERVER_PUBLIC_URL\` | \`https://<qgis-service>.up.railway.app/qgis\` |\n`;
+      md += `| \`QGIS_SERVER_PUBLIC_URL\` | \`https://<qgis-service>.up.railway.app/ows/\` |\n`;
     }
     if (!isGpkg) {
       const envLines = generateEnvFile(source).split('\n').filter(l => l.includes('=') && !l.startsWith('#') && !l.startsWith('PYGEOAPI') && !l.startsWith('PORT') && !l.startsWith('QGIS'));
@@ -1626,12 +1634,12 @@ const generateReadmeForTarget = (
     md += `\n`;
     md += `> **Merk:** Railway setter \`PORT\` automatisk — ikke overstyr denne.\n\n`;
     if (hasWms) {
-      md += `### QGIS Server (WMS)\n\n`;
+      md += `### QGIS Server (WMS/WFS)\n\n`;
       md += `Railway deployer én tjeneste per repo som standard. For å kjøre QGIS Server i tillegg:\n\n`;
       md += `1. Klikk **"+ New"** → **"GitHub Repo"** i samme prosjekt\n`;
       md += `2. Velg dette repoet igjen\n`;
-      md += `3. Under **Settings → Build**, sett Dockerfile path til \`Dockerfile.qgis\` (eller bruk \`railway.qgis.json\` i repo-roten)\n`;
-      md += `4. Under **Settings → Deploy**, sett health check path til \`/?SERVICE=WMS&REQUEST=GetCapabilities\` og timeout til **300s** — QGIS Server har ingen enkel \/health-rute\n`;
+      md += `3. Under **Settings → Build**, sett Dockerfile path til \`Dockerfile.qgis\`\n`;
+      md += `4. Under **Settings → Deploy**, sett health check path til \`/ows/?SERVICE=WMS&REQUEST=GetCapabilities\` og timeout til **300s**\n`;
       md += `5. Bekreft at porten vises som **80** under **Settings → Networking**\n\n`;
     }
     if (isGpkg) {
@@ -1652,7 +1660,7 @@ const generateReadmeForTarget = (
     md += `|-------|-------------|\n`;
     md += `| \`ghcr.io/<owner>/${slug}:latest\` | pygeoapi (OGC API) |\n`;
     if (hasWms) {
-      md += `| \`ghcr.io/<owner>/${slug}-qgis:latest\` | QGIS Server (WMS) |\n`;
+      md += `| \`ghcr.io/<owner>/${slug}-qgis:latest\` | QGIS Server (WMS/WFS) |\n`;
     }
     md += `\n`;
     md += `### Kjøre lokalt\n\n`;
@@ -1691,6 +1699,8 @@ const generateReadmeForTarget = (
 
   return md;
 };
+
+// ============================================================
 // Generate deploy file map — target-aware
 // Returns a flat Record<filename, content> for pushing to GitHub
 // ============================================================
