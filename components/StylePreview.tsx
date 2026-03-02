@@ -73,7 +73,7 @@ const StylePreview: React.FC<StylePreviewProps> = ({ layer, t }) => {
             {style.pointIcon === 'circle' && <circle cx="50" cy="50" r={style.pointSize || 8} fill={color} />}
             {style.pointIcon === 'square' && <rect x={50 - (style.pointSize || 8)} y={50 - (style.pointSize || 8)} width={(style.pointSize || 8) * 2} height={(style.pointSize || 8) * 2} fill={color} />}
             {style.pointIcon === 'triangle' && <path d={`M 50 ${50 - (style.pointSize || 10)} L ${50 + (style.pointSize || 10)} ${50 + (style.pointSize || 10)} L ${50 - (style.pointSize || 10)} ${50 + (style.pointSize || 10)} Z`} fill={color} />}
-            {style.pointIcon === 'star' && <path d="M 50 35 L 53.09 43.1 L 62.36 43.1 L 54.81 48.2 L 57.9 56.3 L 50 51.2 L 42.1 56.3 L 45.19 48.2 L 37.64 43.1 L 46.91 43.1 Z" fill={color} transform={`translate(0, 5) scale(${(style.pointSize || 8) / 8}) translate(${50 - 50 * (style.pointSize || 8) / 8}, ${50 - 50 * (style.pointSize || 8) / 8})`} />}
+            {style.pointIcon === 'star' && <path d="M 50 35 L 53.09 43.1 L 62.36 43.1 L 54.81 48.2 L 57.9 56.3 L 50 51.2 L 42.1 56.3 L 45.19 48.2 L 37.64 43.1 L 46.91 43.1 Z" fill={color} transform={`translate(50, 50) scale(${(style.pointSize || 8) / 8}) translate(-50, -50)`} />}
           </g>
         )}
       </svg>
