@@ -226,6 +226,72 @@ export const generatePygeoapiConfig = async (
 };
 
 // ============================================================
+// Known CRS definitions for common Norwegian/European projections.
+// QGIS requires srid + proj4 + description to be present — if only
+// authid is supplied it silently resets the layer CRS to EPSG:4326.
+// ============================================================
+const CRS_DEFINITIONS: Record<string, { srid: number; description: string; proj4: string; geographicflag: boolean }> = {
+  'EPSG:25833': {
+    srid: 25833,
+    description: 'ETRS89 / UTM zone 33N',
+    proj4: '+proj=utm +zone=33 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+    geographicflag: false,
+  },
+  'EPSG:25832': {
+    srid: 25832,
+    description: 'ETRS89 / UTM zone 32N',
+    proj4: '+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+    geographicflag: false,
+  },
+  'EPSG:25835': {
+    srid: 25835,
+    description: 'ETRS89 / UTM zone 35N',
+    proj4: '+proj=utm +zone=35 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+    geographicflag: false,
+  },
+  'EPSG:4326': {
+    srid: 4326,
+    description: 'WGS 84',
+    proj4: '+proj=longlat +datum=WGS84 +no_defs',
+    geographicflag: true,
+  },
+  'EPSG:4258': {
+    srid: 4258,
+    description: 'ETRS89',
+    proj4: '+proj=longlat +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +no_defs',
+    geographicflag: true,
+  },
+  'EPSG:3857': {
+    srid: 3857,
+    description: 'WGS 84 / Pseudo-Mercator',
+    proj4: '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs',
+    geographicflag: false,
+  },
+};
+
+// Build a full <spatialrefsys> block.
+// QGIS parses CRS from srid + proj4 at load time; a block with only <authid>
+// causes a silent fallback to EPSG:4326 which then propagates into every WMS response.
+const buildSpatialRefSys = (authid: string): string => {
+  const def = CRS_DEFINITIONS[authid];
+  if (def) {
+    return `<spatialrefsys nativeFormat="Wkt">
+          <authid>${authid}</authid>
+          <srid>${def.srid}</srid>
+          <description>${def.description}</description>
+          <proj4>${def.proj4}</proj4>
+          <geographicflag>${def.geographicflag}</geographicflag>
+        </spatialrefsys>`;
+  }
+  // Unknown CRS — emit authid + srid and let QGIS do an online lookup.
+  const srid = authid.includes(':') ? authid.split(':')[1] : '0';
+  return `<spatialrefsys nativeFormat="Wkt">
+          <authid>${authid}</authid>
+          <srid>${srid}</srid>
+        </spatialrefsys>`;
+};
+
+// ============================================================
 // Generate source-aware QGIS project
 // PostGIS/Supabase → postgres layer source
 // Databricks/GeoPackage → gpkg layer source
@@ -235,12 +301,34 @@ export const generateQgisProject = (
   source?: SourceConnection
 ): string => {
   const pgEnv = source ? getPgConnectionEnv(source) : null;
-  const gpkgFilename = getGpkgFilename(model, source);
-  const srid = model.crs?.split(':')[1] || '4326';
 
-  const layersXml = model.layers
+  const rawCrs = model.crs || 'EPSG:4326';
+  const srid = rawCrs.includes(':') ? rawCrs.split(':')[1] : rawCrs;
+  const authid = rawCrs.includes(':') ? rawCrs : `EPSG:${rawCrs}`;
+
+  const gpkgFilename = getGpkgFilename(model, source);
+
+  // WMS CRS list — the native CRS must be included here or QGIS Server will
+  // not advertise it in GetCapabilities, regardless of the project/layer CRS.
+  // Native CRS is listed first as a hint to clients that it is preferred.
+  const wmsCrsList = [authid, 'EPSG:4326', 'EPSG:4258', 'EPSG:3857', 'CRS:84']
+    .filter((v, i, arr) => arr.indexOf(v) === i) // deduplicate (e.g. if native is already 4326)
+    .map(c => `      <value>${c}</value>`)
+    .join('\n');
+
+  // WMS extent for GetCapabilities — use model metadata bbox if available.
+  // Coordinates must be in the project CRS.
+  const ext = model.metadata?.spatialExtent;
+  const wmsExtent = ext?.westBoundLongitude && ext?.southBoundLatitude
+    ? `${ext.westBoundLongitude} ${ext.southBoundLatitude} ${ext.eastBoundLongitude} ${ext.northBoundLatitude}`
+    : '';
+
+  const mapLayers: string[] = [];
+  const treeLayers: string[] = [];
+
+  model.layers
     .filter(l => l.geometryType !== 'None')
-    .map(layer => {
+    .forEach((layer, index) => {
       const tbl = getTableName(layer);
       const mapping = source?.layerMappings?.[layer.id];
       const sourceTable = mapping?.sourceTable || tbl;
@@ -259,29 +347,111 @@ export const generateQgisProject = (
       const opacity = layer.style.fillOpacity !== undefined ? layer.style.fillOpacity : 1;
       const rgb = hexToRgb(layer.style.simpleColor || '#3b82f6');
       const qColor = `${rgb.r},${rgb.g},${rgb.b},255`;
+      // Outline color: same hue at full opacity
+      const qOutlineColor = `${rgb.r},${rgb.g},${rgb.b},255`;
       const isPoint = layer.geometryType.includes('Point');
       const isLine = layer.geometryType.includes('LineString');
 
+      // Map UI lineDash values → QGIS line_style values
+      const qLineStyle: Record<string, string> = {
+        solid: 'solid', dashed: 'dash', dotted: 'dot',
+        'dash-dot': 'dash dot', 'dash-dot-dot': 'dash dot dot', 'long-dash': 'dash',
+      };
+      const lineStyle = qLineStyle[layer.style.lineDash || 'solid'] || 'solid';
+      const lineWidth = layer.style.lineWidth || 2;
+
+      // Map UI pointIcon values → QGIS SimpleMarker name values
+      const qMarkerName: Record<string, string> = {
+        circle: 'circle', square: 'square', triangle: 'triangle', star: 'star',
+      };
+      const markerName = qMarkerName[layer.style.pointIcon || 'circle'] || 'circle';
+
+      // Map UI hatchStyle values → QGIS SimpleFill style values
+      // The UI values (horizontal, vertical, cross, b_diagonal, f_diagonal, diagonal_x)
+      // match QGIS SimpleFill style values directly — no translation needed.
+      const fillStyle = (layer.style.hatchStyle && layer.style.hatchStyle !== 'solid')
+        ? layer.style.hatchStyle
+        : 'solid';
+
       let symbolXml = '';
       if (isPoint) {
-        symbolXml = `<symbol type="marker" name="0"><layer class="SimpleMarker"><prop k="color" v="${qColor}"/><prop k="size" v="${layer.style.pointSize || 8}"/></layer></symbol>`;
+        symbolXml = `<symbol type="marker" name="0">
+          <layer class="SimpleMarker">
+            <prop k="name" v="${markerName}"/>
+            <prop k="color" v="${qColor}"/>
+            <prop k="size" v="${layer.style.pointSize || 8}"/>
+            <prop k="size_unit" v="Point"/>
+            <prop k="outline_color" v="${qOutlineColor}"/>
+            <prop k="outline_width" v="0"/>
+          </layer>
+        </symbol>`;
       } else if (isLine) {
-        symbolXml = `<symbol type="line" name="0"><layer class="SimpleLine"><prop k="line_color" v="${qColor}"/><prop k="line_width" v="${layer.style.lineWidth || 2}"/></layer></symbol>`;
+        symbolXml = `<symbol type="line" name="0">
+          <layer class="SimpleLine">
+            <prop k="line_color" v="${qColor}"/>
+            <prop k="line_width" v="${lineWidth}"/>
+            <prop k="line_width_unit" v="Point"/>
+            <prop k="line_style" v="${lineStyle}"/>
+            <prop k="capstyle" v="round"/>
+            <prop k="joinstyle" v="round"/>
+          </layer>
+        </symbol>`;
       } else {
-        symbolXml = `<symbol alpha="${opacity}" type="fill" name="0"><layer class="SimpleFill"><prop k="color" v="${qColor}"/></layer></symbol>`;
+        // Polygon: use SimpleFill with style for hatching, plus outline
+        symbolXml = `<symbol alpha="${opacity}" type="fill" name="0">
+          <layer class="SimpleFill">
+            <prop k="color" v="${qColor}"/>
+            <prop k="style" v="${fillStyle}"/>
+            <prop k="outline_color" v="${qOutlineColor}"/>
+            <prop k="outline_width" v="${lineWidth}"/>
+            <prop k="outline_width_unit" v="Point"/>
+            <prop k="outline_style" v="${lineStyle}"/>
+            <prop k="joinstyle" v="miter"/>
+          </layer>
+        </symbol>`;
       }
 
-      return `<maplayer name="${layer.name}" type="vector">
-  <datasource>${datasource}</datasource>
-  <provider encoding="UTF-8">${providerKey}</provider>
-  ${symbolXml}
-</maplayer>`;
-    })
-    .join('\n');
+      const layerId = `${tbl}_${index}_${Date.now()}`;
+
+      mapLayers.push(`    <maplayer name="${layer.name}" type="vector" hasScaleBasedVisibilityFlag="0">
+      <id>${layerId}</id>
+      <datasource>${datasource}</datasource>
+      <provider encoding="UTF-8">${providerKey}</provider>
+      <layername>${layer.name}</layername>
+      <shortname>${sourceTable}</shortname>
+      <title>${layer.name}</title>
+      <crs>
+        ${buildSpatialRefSys(authid)}
+      </crs>
+      <renderer-v2 type="singleSymbol" enableorderby="0" forceraster="0">
+        ${symbolXml}
+      </renderer-v2>
+    </maplayer>`);
+
+      treeLayers.push(`    <layer-tree-layer id="${layerId}" name="${layer.name}" providerKey="${providerKey}" checked="Qt::Checked" expanded="1"/>`);
+    });
+
+  const safeModelName = model.name.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'root';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <qgis projectname="${model.name}" version="3.34">
-${layersXml}
+  <projectCrs>
+    ${buildSpatialRefSys(authid)}
+  </projectCrs>
+  <layer-tree-group name="" expanded="1" checked="Qt::Checked">
+${treeLayers.join('\n')}
+  </layer-tree-group>
+  <projectlayers>
+${mapLayers.join('\n')}
+  </projectlayers>
+  <properties>
+    <WMSServiceTitle type="QString">${model.name}</WMSServiceTitle>
+    <WMSRootName type="QString">${safeModelName}</WMSRootName>
+    <WMSCrsList type="QStringList">
+${wmsCrsList}
+    </WMSCrsList>${wmsExtent ? `
+    <WMSExtent type="QRectF">${wmsExtent}</WMSExtent>` : ''}
+  </properties>
 </qgis>`;
 };
 
