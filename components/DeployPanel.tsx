@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useId, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useId, useRef } from 'react';
 import {
   Database, Cloud, Zap, Server, ChevronRight, ChevronDown,
   Check, Eye, EyeOff, Table, Clock, RefreshCw, Package, Upload, X,
@@ -187,9 +187,25 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
     return { type: sourceType, config, layerMappings };
   };
 
-  const previewYaml = useMemo(() => {
-    const source = buildSource();
-    return source ? generatePygeoapiConfig(model, source, lang) : '';
+  const [previewYaml, setPreviewYaml] = useState<string>('');
+
+  useEffect(() => {
+    const generatePreview = async () => {
+      const source = buildSource();
+      if (source) {
+        try {
+          const yaml = await generatePygeoapiConfig(model, source, lang);
+          setPreviewYaml(yaml);
+        } catch (error) {
+          console.error('Failed to generate pygeoapi config:', error);
+          setPreviewYaml('');
+        }
+      } else {
+        setPreviewYaml('');
+      }
+    };
+
+    generatePreview();
   }, [sourceType, pgConfig, supaConfig, dbConfig, gpkgConfig, layerMappings, model, lang]);
 
   const isConnectionValid = (): boolean => {
@@ -211,7 +227,7 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
     setPublishStatus('loading');
     setPublishResult(null);
     try {
-      const files = generateDeployFiles(model, source, lang, deployTarget);
+      const files = await generateDeployFiles(model, source, lang, deployTarget);
       const commitMsg = `[${model.version}] Deploy ${model.name}`;
       
       const binaryFiles: Record<string, Blob> | undefined = 

@@ -2,6 +2,7 @@ import {
   DataModel, Layer, SourceConnection, SourceType, DeployTarget,
   PostgresConfig, SupabaseConfig, DatabricksConfig, GeopackageConfig, LayerSourceMapping
 } from '../types';
+import { reprojectCoordinates } from './gdalService';
 
 // ============================================================
 // Helper: get table name for a layer (same logic as existing exports)
@@ -57,11 +58,11 @@ const getPgConnectionEnv = (source: SourceConnection): Record<string, string> | 
 // PostGIS/Supabase → PostgreSQL provider (live query)
 // Databricks/GeoPackage → SQLiteGPKG provider
 // ============================================================
-export const generatePygeoapiConfig = (
+export const generatePygeoapiConfig = async (
   model: DataModel,
   source?: SourceConnection,
   lang: string = 'no'
-): string => {
+): Promise<string> => {
   const gpkgFilename = getGpkgFilename(model, source);
   const pgEnv = source ? getPgConnectionEnv(source) : null;
   const usePg = pgEnv !== null;
@@ -70,7 +71,22 @@ export const generatePygeoapiConfig = (
   yaml += `# Generated: ${new Date().toISOString()}\n`;
   yaml += `# Source: ${source?.type || 'geopackage (no live connection)'}\n\n`;
 
-  yaml += `server:\n  bind:\n    host: 0.0.0.0\n    port: 80\n  url: http://localhost:5000\n  mimetype: application/json; charset=UTF-8\n  encoding: utf-8\n  languages:\n    - ${lang === 'no' ? 'nb-NO' : 'en-US'}\n\n`;
+  // FIX: Use env vars for both port and public URL so Railway/Fly/etc work correctly.
+  // PORT is injected automatically by Railway; PYGEOAPI_SERVER_URL must be set manually
+  // to the public-facing HTTPS URL after first deploy.
+  yaml += `server:\n  bind:\n    host: 0.0.0.0\n    port: \${PORT:-80}\n`;
+  yaml += `  url: \${PYGEOAPI_SERVER_URL}\n`;
+  yaml += `  mimetype: application/json; charset=UTF-8\n  encoding: utf-8\n  languages:\n    - ${lang === 'no' ? 'nb-NO' : 'en-US'}\n`;
+  // Required by pygeoapi's collection.html template — without this the page throws
+  // "dict object has no attribute 'map'" when rendering the HTML view of a collection.
+  yaml += `  map:\n`;
+  yaml += `    url: https://tile.openstreetmap.org/{z}/{x}/{y}.png\n`;
+  yaml += `    attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap contributors</a>'\n`;
+  // Required by pygeoapi items/index.html — reads limits.default_items for the
+  // items-per-page dropdown. Must be present or page throws UndefinedError.
+  yaml += `  limits:\n`;
+  yaml += `    default_items: 10\n`;
+  yaml += `    max_items: 10000\n\n`;
   yaml += `logging:\n  level: INFO\n\n`;
 
   // Metadata — enriched from model.metadata if available
@@ -83,7 +99,7 @@ export const generatePygeoapiConfig = (
     'CC-BY-SA-4.0': 'https://creativecommons.org/licenses/by-sa/4.0/',
     'NLOD-2.0': 'https://data.norge.no/nlod/no/2.0',
   };
-  
+
   yaml += `metadata:\n`;
   yaml += `  identification:\n`;
   yaml += `    title: ${model.name}\n`;
@@ -92,15 +108,15 @@ export const generatePygeoapiConfig = (
   yaml += `    terms_of_service: ${meta.termsOfService || 'https://example.com/terms'}\n`;
   yaml += `    keywords:\n`;
   keywords.forEach(kw => { yaml += `      - ${kw}\n`; });
-  
+
   if (meta?.purpose) {
     yaml += `    abstract: ${meta.purpose}\n`;
   }
-  
+
   yaml += `  license:\n`;
   yaml += `    name: ${licenseName}\n`;
   yaml += `    url: ${licenseUrls[licenseName] || ''}\n`;
-  
+
   if (meta?.contactName || meta?.contactEmail || meta?.contactOrganization) {
     yaml += `  contact:\n`;
     yaml += `    name: ${meta.contactName || 'Contact'}\n`;
@@ -113,31 +129,57 @@ export const generatePygeoapiConfig = (
   yaml += `\n`;
   yaml += `resources:\n`;
 
-  model.layers.forEach(layer => {
+  for (const layer of model.layers) {
     const collectionId = getTableName(layer);
     const mapping = source?.layerMappings?.[layer.id];
     const sourceTable = mapping?.sourceTable || collectionId;
+
+    // pygeoapi requires a keywords list on every collection resource — not just
+    // in top-level metadata. Missing keywords causes a KeyError on /collections.
+    const layerKeywords = (layer as any).keywords?.length
+      ? (layer as any).keywords
+      : [model.namespace || 'data', layer.name.toLowerCase().replace(/[^a-z0-9]/g, '-')];
 
     yaml += `  ${collectionId}:\n`;
     yaml += `    type: collection\n`;
     yaml += `    title: ${layer.name}\n`;
     yaml += `    description: ${layer.description || 'Spatial collection'}\n`;
+    yaml += `    keywords:\n`;
+    layerKeywords.forEach((kw: string) => { yaml += `      - ${kw}\n`; });
 
     if (layer.geometryType !== 'None') {
       const ext = model.metadata?.spatialExtent;
       const hasBbox = ext?.westBoundLongitude && ext?.southBoundLatitude && ext?.eastBoundLongitude && ext?.northBoundLatitude;
-      const bbox = hasBbox
-        ? `[${ext!.westBoundLongitude}, ${ext!.southBoundLatitude}, ${ext!.eastBoundLongitude}, ${ext!.northBoundLatitude}]`
-        : '[-180, -90, 180, 90]';
+      
+      let bbox = '[-180, -90, 180, 90]'; // default to world extent in WGS84
+      
+      if (hasBbox && model.crs) {
+        // Transform bbox from model CRS to WGS84
+        const coords: [number, number][] = [
+          [Number(ext!.westBoundLongitude), Number(ext!.southBoundLatitude)], // SW corner
+          [Number(ext!.eastBoundLongitude), Number(ext!.northBoundLatitude)]  // NE corner
+        ];
+        
+        try {
+          const transformed = await reprojectCoordinates(coords, model.crs, 'EPSG:4326');
+          bbox = `[${transformed[0][0]}, ${transformed[0][1]}, ${transformed[1][0]}, ${transformed[1][1]}]`;
+        } catch (error) {
+          console.warn('Failed to transform bbox to WGS84, using original coordinates:', error);
+          bbox = `[${ext!.westBoundLongitude}, ${ext!.southBoundLatitude}, ${ext!.eastBoundLongitude}, ${ext!.northBoundLatitude}]`;
+        }
+      } else if (hasBbox) {
+        // Use original bbox if no CRS transformation needed
+        bbox = `[${ext!.westBoundLongitude}, ${ext!.southBoundLatitude}, ${ext!.eastBoundLongitude}, ${ext!.northBoundLatitude}]`;
+      }
+      
       yaml += `    extents:\n`;
       yaml += `      spatial:\n`;
       yaml += `        bbox: ${bbox}\n`;
       yaml += `        crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84\n`;
     }
 
-    yaml += `    providers:\n`;
-
     if (usePg) {
+      yaml += `    providers:\n`;
       // Live connection to PostGIS / Supabase
       yaml += `      - type: feature\n`;
       yaml += `        name: PostgreSQL\n`;
@@ -154,14 +196,31 @@ export const generatePygeoapiConfig = (
       yaml += `        geom_field: ${layer.geometryColumnName || 'geom'}\n\n`;
     } else {
       // GeoPackage file provider (Databricks, direct GeoPackage, or no source)
+      // storage_crs tells pygeoapi the native CRS of the GeoPackage so it
+      // can reproject correctly to CRS84 for API output.
+      // - If model.crs is set (e.g. from import or manual selection), use it.
+      // - If not set, omit storage_crs entirely: pygeoapi's SQLiteGPKG provider
+      //   reads CRS from gpkg_spatial_ref_sys automatically for well-formed files.
+      //   Fallback to 4326 only as last resort since a wrong CRS is worse than none.
+      const rawCrs = model.crs;
+      const storageCrsUri = rawCrs
+        ? (rawCrs.startsWith('http')
+            ? rawCrs
+            : `http://www.opengis.net/def/crs/EPSG/0/${rawCrs.split(':')[1]}`)
+        : null;
+      yaml += `    providers:\n`;
       yaml += `      - type: feature\n`;
       yaml += `        name: SQLiteGPKG\n`;
       yaml += `        data: /data/${gpkgFilename}\n`;
       yaml += `        table: ${sourceTable}\n`;
       yaml += `        id_field: ${mapping?.primaryKeyColumn || 'fid'}\n`;
-      yaml += `        geom_field: ${layer.geometryColumnName || 'geom'}\n\n`;
+      yaml += `        geom_field: ${layer.geometryColumnName || 'geom'}\n`;
+      if (storageCrsUri) {
+        yaml += `        storage_crs: ${storageCrsUri}\n`;
+      }
+      yaml += `\n`;
     }
-  });
+  }
 
   return yaml;
 };
@@ -177,7 +236,7 @@ export const generateQgisProject = (
 ): string => {
   const pgEnv = source ? getPgConnectionEnv(source) : null;
   const gpkgFilename = getGpkgFilename(model, source);
-  const srid = model.crs?.split(':')[1] || '25833';
+  const srid = model.crs?.split(':')[1] || '4326';
 
   const layersXml = model.layers
     .filter(l => l.geometryType !== 'None')
@@ -186,7 +245,6 @@ export const generateQgisProject = (
       const mapping = source?.layerMappings?.[layer.id];
       const sourceTable = mapping?.sourceTable || tbl;
       const geomCol = layer.geometryColumnName || 'geom';
-
       const pkCol = mapping?.primaryKeyColumn || 'fid';
 
       let datasource: string;
@@ -198,7 +256,6 @@ export const generateQgisProject = (
 
       const providerKey = pgEnv ? 'postgres' : 'ogr';
 
-      // Reuse existing symbol generation logic
       const opacity = layer.style.fillOpacity !== undefined ? layer.style.fillOpacity : 1;
       const rgb = hexToRgb(layer.style.simpleColor || '#3b82f6');
       const qColor = `${rgb.r},${rgb.g},${rgb.b},255`;
@@ -243,7 +300,7 @@ export const generateDeltaScript = (
 
   const modelFilename = model.name.replace(/\s/g, '_') || 'modell';
   const isPg = source.type === 'postgis' || source.type === 'supabase';
-  const srid = model.crs?.split(':')[1] || '25833';
+  const srid = model.crs?.split(':')[1] || '4326';
 
   // ---- Shared header ----
   let script = `#!/usr/bin/env python3
@@ -424,7 +481,6 @@ def export_${tbl}(since=None):
 `;
 
       if (tsCol) {
-        // Has timestamp: use it for change detection + FID diff for deletes
         script += `    # Step 4: Export inserts + updates (timestamp-based)
     sql_changes = f"""
         SELECT *,
@@ -451,8 +507,6 @@ def export_${tbl}(since=None):
 
 `;
       } else {
-        // No timestamp: can only detect inserts and deletes via FID diff
-        // Updates are invisible without a timestamp column
         script += `    # Step 4: Export inserts (PK-based, no timestamp available)
     # NOTE: Without a timestamp column, updates to existing features
     # cannot be detected. Only inserts and deletes are tracked.
@@ -685,8 +739,27 @@ export const generateEnvFile = (source: SourceConnection): string => {
   env += `# COPY THIS FILE: cp .env.template .env\n`;
   env += `# Then fill in your actual credentials below.\n\n`;
 
+  // FIX: pygeoapi uses PYGEOAPI_SERVER_URL for all self-referencing links.
+  // Set this to the public-facing URL of your deployment (no trailing slash).
+  // Railway: copy the generated domain from the Railway dashboard after first deploy.
+  // Fly.io:  https://<app-name>-pygeoapi.fly.dev (known before deploy)
+  env += `# --- pygeoapi public URL ---\n`;
+  env += `# Must be set to your public HTTPS URL — used in all API self-links.\n`;
+  env += `# Railway: https://<your-app>.up.railway.app\n`;
+  env += `# Fly.io:  https://<slug>-pygeoapi.fly.dev\n`;
+  env += `# Local:   http://localhost:5000\n`;
+  env += `PYGEOAPI_SERVER_URL=http://localhost:5000\n\n`;
+
+  // FIX: PORT is injected automatically by Railway. Fly.io ignores this env var
+  // (it uses internal_port in fly.toml). For local docker-compose, 80 is correct.
+  env += `# --- Bind port ---\n`;
+  env += `# Railway sets this automatically — do not change on Railway.\n`;
+  env += `# Fly.io uses fly.toml internal_port instead — leave as 80 here.\n`;
+  env += `PORT=80\n\n`;
+
   if (source.type === 'postgis') {
     const c = source.config as PostgresConfig;
+    env += `# --- PostGIS connection ---\n`;
     env += `POSTGRES_HOST=${c.host}\n`;
     env += `POSTGRES_PORT=${c.port}\n`;
     env += `POSTGRES_DB=${c.dbname}\n`;
@@ -696,6 +769,7 @@ export const generateEnvFile = (source: SourceConnection): string => {
   } else if (source.type === 'supabase') {
     const c = source.config as SupabaseConfig;
     const ref = c.projectUrl.replace('https://', '').replace('.supabase.co', '');
+    env += `# --- Supabase / PostGIS connection ---\n`;
     env += `POSTGRES_HOST=db.${ref}.supabase.co\n`;
     env += `POSTGRES_PORT=5432\n`;
     env += `POSTGRES_DB=postgres\n`;
@@ -706,6 +780,7 @@ export const generateEnvFile = (source: SourceConnection): string => {
     env += `SUPABASE_ANON_KEY=${c.anonKey}\n`;
   } else if (source.type === 'databricks') {
     const c = source.config as DatabricksConfig;
+    env += `# --- Databricks connection ---\n`;
     env += `DATABRICKS_HOST=${c.host}\n`;
     env += `DATABRICKS_HTTP_PATH=${c.httpPath}\n`;
     env += `DATABRICKS_TOKEN=${c.token}\n`;
@@ -715,9 +790,19 @@ export const generateEnvFile = (source: SourceConnection): string => {
     env += `# No database credentials required for GeoPackage source\n`;
   }
 
+  // FIX: QGIS Server needs QGIS_SERVER_SERVICE_URL so GetCapabilities advertises
+  // the correct public HTTPS URL rather than the internal http:// address.
+  env += `\n# --- QGIS Server public URL (WMS) ---\n`;
+  env += `# Set to the public-facing HTTPS URL for the QGIS Server service.\n`;
+  env += `# Without this, GetCapabilities will advertise http:// behind an HTTPS proxy.\n`;
+  env += `# Railway: https://<qgis-service>.up.railway.app/qgis\n`;
+  env += `# Fly.io:  https://<slug>-qgis.fly.dev/qgis\n`;
+  env += `# Local:   leave blank (not needed)\n`;
+  env += `QGIS_SERVER_PUBLIC_URL=\n`;
+
   env += `\n# --- Configuration & Output ---\n`;
   env += `OUTPUT_DIR=./data/output\n`;
-  
+
   if (source.type !== 'geopackage') {
     env += `\n# Delta Sync Interval in seconds (86400 = 24 hours)\n`;
     env += `SYNC_INTERVAL_SECONDS=86400\n`;
@@ -777,6 +862,9 @@ services:
   if (hasGeomLayers) {
     compose += `
   # --- WMS (QGIS Server) ---
+  # FIX: QGIS_SERVER_SERVICE_URL ensures GetCapabilities advertises the correct
+  # public URL when running behind an HTTPS reverse proxy (Railway, Fly, nginx).
+  # Set QGIS_SERVER_PUBLIC_URL in your .env file after first deploy.
   qgis-server:
     image: qgis/qgis-server:ltr
     ports:
@@ -789,6 +877,7 @@ services:
     }
     compose += `    environment:
       QGIS_PROJECT_FILE: /data/project.qgs
+      QGIS_SERVER_SERVICE_URL: \${QGIS_SERVER_PUBLIC_URL:-}
     env_file: .env
     restart: unless-stopped
 `;
@@ -902,7 +991,7 @@ export const generateReadme = (model: DataModel, source: SourceConnection): stri
     md += `Delta-eksporten kjører automatisk i bakgrunnen og håndterer **inserts, updates og deletes**.\n`;
     md += `Intervallet styres av \`SYNC_INTERVAL_SECONDS\` i \`.env\`-filen (standard er 86400 sekunder / 24 timer).\n\n`;
     md += `Nye \`.gpkg\`-filer blir automatisk tilgjengelige for nedlasting på **http://localhost:8081**.\n\n`;
-    
+
     md += `### Hva delta-filen inneholder\n\n`;
     md += `| \_change\_type | Beskrivelse |\n`;
     md += `|---------------|-------------|\n`;
@@ -929,15 +1018,12 @@ export const generateReadme = (model: DataModel, source: SourceConnection): stri
 };
 
 // ============================================================
-// ============================================================
 // Generate GitHub Actions workflow for CI/CD deployment
 // ============================================================
 export const generateGithubActionsWorkflow = (
   model: DataModel,
   source: SourceConnection
 ): string => {
-  const isPg = source.type === 'postgis' || source.type === 'supabase';
-  const isGpkg = source.type === 'geopackage';
   const hasWms = model.layers.some(l => l.geometryType !== 'None');
   const slug = model.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
@@ -1059,14 +1145,11 @@ jobs:
             docker compose pull
             docker compose up -d --remove-orphans
             echo "✓ ${model.name} deployed successfully"
-`;
 
-  workflow += `
       - name: Health check
         run: |
           echo "Waiting for services to start..."
           sleep 10
-          # Health check would go here when DEPLOY_URL is configured
           # curl -sf \${{ secrets.DEPLOY_URL }}/conformance || exit 1
           echo "✓ Deployment complete"
 `;
@@ -1089,21 +1172,23 @@ export const generateDockerfile = (
 COPY pygeoapi-config.yml /pygeoapi/local.config.yml
 ${isGpkg ? 'COPY data/ /data/' : ''}
 
-# Expose port
+# FIX: Default env vars so the container starts correctly when no .env is present.
+# PORT is overridden automatically by Railway. PYGEOAPI_SERVER_URL must be set
+# manually to the public HTTPS URL after first deploy.
+ENV PORT=80
+ENV PYGEOAPI_SERVER_URL=http://localhost:5000
+
 EXPOSE 80
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \\
-  CMD curl -sf http://localhost:80/conformance || exit 1
-
 # Create AsyncAPI document placeholder (required by pygeoapi startup check)
-RUN echo "asyncapi: 2.6.0" > /pygeoapi/local.asyncapi.yml && \\
-    echo "info:" >> /pygeoapi/local.asyncapi.yml && \\
-    echo "  title: pygeoapi" >> /pygeoapi/local.asyncapi.yml && \\
-    echo "  version: 1.0.0" >> /pygeoapi/local.asyncapi.yml && \\
+RUN echo "asyncapi: 2.6.0" > /pygeoapi/local.asyncapi.yml && \
+    echo "info:" >> /pygeoapi/local.asyncapi.yml && \
+    echo "  title: pygeoapi" >> /pygeoapi/local.asyncapi.yml && \
+    echo "  version: 1.0.0" >> /pygeoapi/local.asyncapi.yml && \
     echo "channels: {}" >> /pygeoapi/local.asyncapi.yml
 `;
 };
+
 // ============================================================
 export const generateQgisDockerfile = (
   model: DataModel,
@@ -1115,7 +1200,16 @@ export const generateQgisDockerfile = (
 COPY project.qgs /data/project.qgs
 ${isGpkg ? 'COPY data/ /data/' : ''}
 
+# FIX: SQLite/GeoPackage needs directory write permissions to create temporary 
+# lock/journal files (-wal, -shm) even during read-only operations. 
+# Without this, QGIS Server silently drops the layers.
+RUN chmod -R 777 /data
+
 ENV QGIS_PROJECT_FILE=/data/project.qgs
+# FIX: QGIS_SERVER_SERVICE_URL is set at runtime via .env / Railway / Fly variables
+# so GetCapabilities advertises the correct public HTTPS URL.
+# Default is blank — QGIS Server falls back to request Host header (fine for local use).
+ENV QGIS_SERVER_SERVICE_URL=
 EXPOSE 80
 `;
 };
@@ -1130,6 +1224,8 @@ export const generateFlyToml = (
   const slug = model.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const hasWms = model.layers.some(l => l.geometryType !== 'None');
 
+  // FIX: Pre-populate PYGEOAPI_SERVER_URL since the Fly app name is deterministic.
+  // Users can override after deploy if they use a custom domain.
   let toml = `# Fly.io configuration for ${model.name}
 # Generated by GeoForge
 #
@@ -1142,6 +1238,13 @@ primary_region = "ams"
 
 [build]
   dockerfile = "Dockerfile"
+
+[env]
+  # FIX: Pre-populated since Fly app names are deterministic.
+  # Update if you configure a custom domain.
+  PYGEOAPI_SERVER_URL = "https://${slug}-pygeoapi.fly.dev"
+  # Fly routes to internal_port (80) below — PORT env var is not used by Fly.
+  PORT = "80"
 
 [http_service]
   internal_port = 80
@@ -1198,6 +1301,11 @@ primary_region = "ams"
 [build]
   dockerfile = "Dockerfile.qgis"
 
+[env]
+  # FIX: Pre-populated so GetCapabilities advertises the correct HTTPS URL.
+  # Update the /qgis path suffix if your QGIS Server is mounted differently.
+  QGIS_SERVER_SERVICE_URL = "https://${slug}-qgis.fly.dev/qgis"
+
 [http_service]
   internal_port = 80
   force_https = true
@@ -1223,13 +1331,37 @@ export const generateRailwayJson = (
   model: DataModel,
   source: SourceConnection
 ): string => {
-  const hasWms = model.layers.some(l => l.geometryType !== 'None');
-
   const config: any = {
     "$schema": "https://railway.com/railway.schema.json",
     build: { builder: "DOCKERFILE", dockerfilePath: "Dockerfile" },
     deploy: {
+      // FIX: Railway auto-detects EXPOSE 80 from the Dockerfile.
+      // healthcheckTimeout gives Railway enough time for pygeoapi cold start.
       healthcheckPath: "/conformance",
+      healthcheckTimeout: 300,
+      restartPolicyType: "ON_FAILURE",
+      restartPolicyMaxRetries: 10
+    }
+  };
+
+  return JSON.stringify(config, null, 2);
+};
+
+// ============================================================
+// Generate railway.json for QGIS Server service on Railway
+// ============================================================
+export const generateRailwayQgisJson = (
+  model: DataModel,
+  source: SourceConnection
+): string => {
+  const config: any = {
+    "$schema": "https://railway.com/railway.schema.json",
+    build: { builder: "DOCKERFILE", dockerfilePath: "Dockerfile.qgis" },
+    deploy: {
+      // QGIS Server has no simple health endpoint — use WMS GetCapabilities.
+      // The long timeout is needed because QGIS loads the project on first request.
+      healthcheckPath: "/?SERVICE=WMS&REQUEST=GetCapabilities",
+      healthcheckTimeout: 300,
       restartPolicyType: "ON_FAILURE",
       restartPolicyMaxRetries: 10
     }
@@ -1411,22 +1543,30 @@ const generateReadmeForTarget = (
     'ghcr': 'GitHub Container Registry',
   };
 
+  // FIX: Target-aware WMS URL instead of hardcoded localhost:8080
+  const wmsUrls: Record<DeployTarget, string> = {
+    'docker-compose': 'http://localhost:8080/qgis',
+    'fly': `https://${slug}-qgis.fly.dev/qgis`,
+    'railway': 'https://<qgis-service>.up.railway.app/qgis',
+    'ghcr': 'http://localhost:8080/qgis',
+  };
+  const wmsUrl = wmsUrls[target];
+
   let md = `# ${model.name} — Deploy Kit\n\n`;
   md += `Autogenerert fra GeoForge · Deployment target: **${targetNames[target]}**\n\n`;
 
   // Services table
   md += `## Tjenester\n\n`;
-  md += `| Tjeneste | Beskrivelse |\n`;
-  md += `|----------|-------------|\n`;
-  md += `| pygeoapi | OGC API – Features |\n`;
+  md += `| Tjeneste | Beskrivelse | URL |\n`;
+  md += `|----------|-------------|-----|\n`;
+  md += `| pygeoapi | OGC API – Features | ${target === 'docker-compose' ? 'http://localhost:5000' : target === 'fly' ? `https://${slug}-pygeoapi.fly.dev` : target === 'railway' ? 'https://\\<app\\>.up.railway.app' : 'http://localhost:5000'} |\n`;
   if (hasWms) {
-    md += `| QGIS Server | WMS/WFS kartlag |\n`;
+    md += `| QGIS Server | WMS/WFS kartlag | ${wmsUrl}?SERVICE=WMS&REQUEST=GetCapabilities |\n`;
   }
   md += `\n`;
 
   if (target === 'docker-compose') {
-    return md + generateReadme(model, source).split('## Tjenester')[1]?.split('## Tjenester').pop() 
-      || generateReadme(model, source).substring(generateReadme(model, source).indexOf('## Kom i gang'));
+    return md + generateReadme(model, source).substring(generateReadme(model, source).indexOf('## Kom i gang'));
   }
 
   if (target === 'fly') {
@@ -1455,6 +1595,7 @@ const generateReadmeForTarget = (
       md += `fly deploy --config fly.qgis.toml\n`;
     }
     md += `\`\`\`\n\n`;
+    md += `> **Merk:** \`PYGEOAPI_SERVER_URL\` og \`QGIS_SERVER_SERVICE_URL\` er forhåndsutfylt i \`fly.toml\` / \`fly.qgis.toml\` basert på det genererte appnavnet. Oppdater disse om du setter opp et eget domene.\n\n`;
     md += `### Automatisk deploy\n\n`;
     md += `Legg til \`FLY_API_TOKEN\` som GitHub Secret. GitHub Actions deployer automatisk ved push til main.\n\n`;
     md += `Hent token: \`fly tokens create deploy -x 999999h\`\n\n`;
@@ -1467,23 +1608,36 @@ const generateReadmeForTarget = (
     md += `2. Klikk **"New Project"** → **"Deploy from GitHub Repo"**\n`;
     md += `3. Velg dette repoet\n`;
     md += `4. Railway oppdager \`Dockerfile\` automatisk og starter deploy\n\n`;
+    md += `### Miljøvariabler\n\n`;
+    md += `Sett disse under **Variables** i Railway dashboard:\n\n`;
+    md += `| Variabel | Verdi |\n`;
+    md += `|----------|-------|\n`;
+    md += `| \`PYGEOAPI_SERVER_URL\` | \`https://<din-app>.up.railway.app\` (kopier fra Railway dashboard) |\n`;
+    if (hasWms) {
+      md += `| \`QGIS_SERVER_PUBLIC_URL\` | \`https://<qgis-service>.up.railway.app/qgis\` |\n`;
+    }
+    if (!isGpkg) {
+      const envLines = generateEnvFile(source).split('\n').filter(l => l.includes('=') && !l.startsWith('#') && !l.startsWith('PYGEOAPI') && !l.startsWith('PORT') && !l.startsWith('QGIS'));
+      envLines.forEach(l => {
+        const [k] = l.split('=');
+        md += `| \`${k}\` | *(din verdi)* |\n`;
+      });
+    }
+    md += `\n`;
+    md += `> **Merk:** Railway setter \`PORT\` automatisk — ikke overstyr denne.\n\n`;
     if (hasWms) {
       md += `### QGIS Server (WMS)\n\n`;
       md += `Railway deployer én tjeneste per repo som standard. For å kjøre QGIS Server i tillegg:\n\n`;
       md += `1. Klikk **"+ New"** → **"GitHub Repo"** i samme prosjekt\n`;
       md += `2. Velg dette repoet igjen\n`;
-      md += `3. Under **Settings → Build**, sett Dockerfile path til \`Dockerfile.qgis\`\n\n`;
+      md += `3. Under **Settings → Build**, sett Dockerfile path til \`Dockerfile.qgis\` (eller bruk \`railway.qgis.json\` i repo-roten)\n`;
+      md += `4. Under **Settings → Deploy**, sett health check path til \`/?SERVICE=WMS&REQUEST=GetCapabilities\` og timeout til **300s** — QGIS Server har ingen enkel \/health-rute\n`;
+      md += `5. Bekreft at porten vises som **80** under **Settings → Networking**\n\n`;
     }
     if (isGpkg) {
       md += `### Data\n\n`;
       md += `GeoPackage-filen er bakt inn i Docker-imaget under build.\n`;
       md += `For å oppdatere data: legg ny fil i \`data/\`-mappen og push til GitHub.\n\n`;
-    } else {
-      md += `### Miljøvariabler\n\n`;
-      md += `Sett disse under **Variables** i Railway dashboard:\n\n`;
-      md += `\`\`\`\n`;
-      md += generateEnvFile(source).split('\n').filter(l => l.includes('=') && !l.startsWith('#')).join('\n');
-      md += `\n\`\`\`\n\n`;
     }
     md += `### Automatisk deploy\n\n`;
     md += `Railway deployer automatisk ved push til main. Ingen GitHub Actions nødvendig.\n\n`;
@@ -1504,16 +1658,16 @@ const generateReadmeForTarget = (
     md += `### Kjøre lokalt\n\n`;
     md += `\`\`\`bash\n`;
     md += `docker pull ghcr.io/<owner>/${slug}:latest\n`;
-    md += `docker run -p 5000:80 ghcr.io/<owner>/${slug}:latest\n`;
+    md += `docker run -p 5000:80 \\\n`;
+    md += `  -e PYGEOAPI_SERVER_URL=http://localhost:5000 \\\n`;
+    md += `  ghcr.io/<owner>/${slug}:latest\n`;
     md += `\`\`\`\n\n`;
     md += `### Bruke med Docker Compose\n\n`;
-    md += `Bruk \`docker-compose.yml\` som følger med for å kjøre alle tjenester:\n\n`;
     md += `\`\`\`bash\n`;
     md += `docker compose up -d\n`;
     md += `\`\`\`\n\n`;
     md += `### Automatisk bygg\n\n`;
-    md += `GitHub Actions bygger og pusher nye images automatisk ved push til main.\n`;
-    md += `Driftsmiljøet kan polle \`:latest\`-taggen eller lytte på webhook for å redeploye.\n\n`;
+    md += `GitHub Actions bygger og pusher nye images automatisk ved push til main.\n\n`;
   }
 
   // Files table
@@ -1530,23 +1684,22 @@ const generateReadmeForTarget = (
   if (target === 'docker-compose') md += `| \`docker-compose.yml\` | Starter alle tjenester |\n`;
   if (target === 'fly') md += `| \`fly.toml\` | Fly.io-konfigurasjon (pygeoapi) |\n`;
   if (target === 'fly' && hasWms) md += `| \`fly.qgis.toml\` | Fly.io-konfigurasjon (QGIS) |\n`;
-  if (target === 'railway') md += `| \`railway.json\` | Railway-konfigurasjon |\n`;
+  if (target === 'railway') md += `| \`railway.json\` | Railway-konfigurasjon (pygeoapi) |\n`;
+  if (target === 'railway' && hasWms) md += `| \`railway.qgis.json\` | Railway-konfigurasjon (QGIS Server) |\n`;
   md += `| \`.env.template\` | Mal for miljøvariabler |\n`;
   if (!isGpkg) md += `| \`delta_export.py\` | Inkrementell GeoPackage-eksport |\n`;
 
   return md;
 };
-
-// ============================================================
 // Generate deploy file map — target-aware
 // Returns a flat Record<filename, content> for pushing to GitHub
 // ============================================================
-export const generateDeployFiles = (
+export const generateDeployFiles = async (
   model: DataModel,
   source: SourceConnection,
   lang: string = 'no',
   target: DeployTarget = 'docker-compose'
-): Record<string, string> => {
+): Promise<Record<string, string>> => {
   const isGpkg = source.type === 'geopackage';
   const hasWms = model.layers.some(l => l.geometryType !== 'None');
 
@@ -1554,14 +1707,14 @@ export const generateDeployFiles = (
   const files: Record<string, string> = {
     'model.json': JSON.stringify(model, null, 2),
     'Dockerfile': generateDockerfile(model, source),
-    'pygeoapi-config.yml': generatePygeoapiConfig(model, source, lang),
+    'pygeoapi-config.yml': await generatePygeoapiConfig(model, source, lang),
     '.env.template': generateEnvFile(source),
     '.gitignore': '.env\ndata/\n*.gpkg\n__pycache__/\n',
     'README.md': generateReadmeForTarget(model, source, target),
     '.github/workflows/deploy.yml': generateWorkflowForTarget(model, source, target),
   };
 
-  // QGIS project + Dockerfile.qgis (for targets that need separate service)
+  // QGIS project + Dockerfile.qgis
   if (hasWms) {
     files['project.qgs'] = generateQgisProject(model, source);
     if (target !== 'docker-compose') {
@@ -1591,6 +1744,11 @@ export const generateDeployFiles = (
 
   if (target === 'railway') {
     files['railway.json'] = generateRailwayJson(model, source);
+    // Separate railway.json for the QGIS Server service (deployed as a second
+    // Railway service from the same repo with a different Dockerfile path).
+    if (hasWms) {
+      files['railway.qgis.json'] = generateRailwayQgisJson(model, source);
+    }
   }
 
   if (target === 'ghcr') {
@@ -1611,7 +1769,7 @@ export const exportDeployKit = async (
   target: DeployTarget = 'docker-compose',
   binaryFiles?: Record<string, Blob>
 ) => {
-  const files = generateDeployFiles(model, source, lang, target);
+  const files = await generateDeployFiles(model, source, lang, target);
 
   try {
     const JSZip = (await import('jszip')).default;
@@ -1652,8 +1810,7 @@ export const exportDeployKit = async (
 };
 
 // ============================================================
-// Utility: hexToRgb (duplicated here to avoid circular imports,
-// or import from exportUtils if preferred)
+// Utility: hexToRgb
 // ============================================================
 const hexToRgb = (hex: string) => {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
