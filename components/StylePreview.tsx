@@ -40,28 +40,32 @@ const StylePreview: React.FC<StylePreviewProps> = ({ layer, t }) => {
       </div>
       <svg viewBox="0 0 100 100" className="w-20 h-20 sm:w-32 sm:h-32 overflow-visible">
         <defs>
-          <pattern id="hatch-horizontal" width={s} height={s} patternUnits="userSpaceOnUse">
-            <path d={`M 0 ${s / 2} H ${s}`} stroke={color} strokeWidth={t_val} />
+          {/* Straight patterns extended slightly past the box to avoid 1px anti-alias gaps */}
+          <pattern id={`hatch-horizontal-${layer.id}`} width={s} height={s} patternUnits="userSpaceOnUse">
+            <path d={`M -2 ${s / 2} H ${s + 2}`} stroke={color} strokeWidth={t_val} />
           </pattern>
-          <pattern id="hatch-vertical" width={s} height={s} patternUnits="userSpaceOnUse">
-            <path d={`M ${s / 2} 0 V ${s}`} stroke={color} strokeWidth={t_val} />
+          <pattern id={`hatch-vertical-${layer.id}`} width={s} height={s} patternUnits="userSpaceOnUse">
+            <path d={`M ${s / 2} -2 V ${s + 2}`} stroke={color} strokeWidth={t_val} />
           </pattern>
-          <pattern id="hatch-cross" width={s} height={s} patternUnits="userSpaceOnUse">
-            <path d={`M 0 ${s / 2} H ${s} M ${s / 2} 0 V ${s}`} stroke={color} strokeWidth={t_val} />
+          <pattern id={`hatch-cross-${layer.id}`} width={s} height={s} patternUnits="userSpaceOnUse">
+            <path d={`M -2 ${s / 2} H ${s + 2} M ${s / 2} -2 V ${s + 2}`} stroke={color} strokeWidth={t_val} />
           </pattern>
-          <pattern id="hatch-b_diagonal" width={s} height={s} patternUnits="userSpaceOnUse">
-            <path d={`M 0 ${s} L ${s} 0`} stroke={color} strokeWidth={t_val} />
+          
+          {/* Diagonal patterns rotated cleanly using patternTransform */}
+          <pattern id={`hatch-b_diagonal-${layer.id}`} width={s} height={s} patternTransform="rotate(-45)" patternUnits="userSpaceOnUse">
+            <path d={`M -2 ${s / 2} H ${s + 2}`} stroke={color} strokeWidth={t_val} />
           </pattern>
-          <pattern id="hatch-f_diagonal" width={s} height={s} patternUnits="userSpaceOnUse">
-            <path d={`M 0 0 L ${s} ${s}`} stroke={color} strokeWidth={t_val} />
+          <pattern id={`hatch-f_diagonal-${layer.id}`} width={s} height={s} patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+            <path d={`M -2 ${s / 2} H ${s + 2}`} stroke={color} strokeWidth={t_val} />
           </pattern>
-          <pattern id="hatch-diagonal_x" width={s} height={s} patternUnits="userSpaceOnUse">
-            <path d={`M 0 0 L ${s} ${s} M 0 ${s} L ${s} 0`} stroke={color} strokeWidth={t_val} />
+          <pattern id={`hatch-diagonal_x-${layer.id}`} width={s} height={s} patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+            <path d={`M -2 ${s / 2} H ${s + 2} M ${s / 2} -2 V ${s + 2}`} stroke={color} strokeWidth={t_val} />
           </pattern>
         </defs>
+        
         {(isPolygon || isCollection) && (
           <g transform={isCollection ? "translate(10,10) scale(0.8)" : ""}>
-            <path d="M 20 20 L 80 20 L 90 80 L 10 90 Z" fill={style.hatchStyle && style.hatchStyle !== 'solid' ? `url(#hatch-${style.hatchStyle})` : color} fillOpacity={style.fillOpacity || 0.5} />
+            <path d="M 20 20 L 80 20 L 90 80 L 10 90 Z" fill={style.hatchStyle && style.hatchStyle !== 'solid' ? `url(#hatch-${style.hatchStyle}-${layer.id})` : color} fillOpacity={style.fillOpacity || 0.5} />
             <path d="M 20 20 L 80 20 L 90 80 L 10 90 Z" fill="none" stroke={color} strokeWidth={style.lineWidth || 2} strokeDasharray={dashArray} strokeLinejoin="round" strokeLinecap="round" />
           </g>
         )}
