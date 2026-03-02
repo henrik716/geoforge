@@ -101,22 +101,37 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
     }
   };
 
+  // Helper: build a publishModel with CRS derived from the import summary.
+  // model.crs may not be set in the QuickPublish flow — summary.layers always
+  // has the correct SRID from gpkg_spatial_ref_sys, so we use that instead.
+  const buildPublishModel = (baseModel: DataModel, selectedIds: Set<string>): DataModel => {
+    const filtered = {
+      ...baseModel,
+      layers: baseModel.layers.filter(l => selectedIds.has(l.id)),
+    };
+    if (!filtered.crs) {
+      const summarySrid = summary.layers.find(sl =>
+        filtered.layers.some(l => l.name === sl.tableName)
+      )?.srid;
+      if (summarySrid) {
+        return { ...filtered, crs: `EPSG:${summarySrid}` };
+      }
+    }
+    return filtered;
+  };
+
   const handlePublish = async () => {
     setPublishStatus('loading');
     setPublishResult(null);
     try {
-      // Build model with only selected layers
-      const publishModel = {
-        ...model,
-        layers: model.layers.filter(l => selectedLayers.has(l.id)),
-      };
-      
+      const publishModel = buildPublishModel(model, selectedLayers);
+
       // Find the actual primary key column for each layer
       const layerMappings = Object.fromEntries(
         publishModel.layers.map(l => {
           const summaryLayer = summary.layers.find(sl => sl.tableName === l.name);
           const primaryKeyColumn = summaryLayer?.primaryKeyColumn || 'fid';
-          
+
           console.log('Layer mapping debug:', {
             layerName: l.name,
             layerId: l.id,
@@ -124,7 +139,7 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
             primaryKeyColumn,
             sourceTable: l.name
           });
-          
+
           return [l.id, {
             sourceTable: l.name, // Use actual table name from GeoPackage import
             fieldMappings: {},
@@ -132,19 +147,19 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
           }];
         })
       );
-      
+
       const source = {
         type: 'geopackage' as const,
         config: { filename: summary.filename },
         layerMappings,
       };
-      const files = generateDeployFiles(publishModel, source, lang, deployTarget);
+      const files = await generateDeployFiles(publishModel, source, lang, deployTarget);
       const commitMsg = `[${publishModel.version}] Publish ${publishModel.name}`;
-      
+
       // Build binary files map if data inclusion is enabled
-      const binaryFiles: Record<string, Blob> | undefined = 
+      const binaryFiles: Record<string, Blob> | undefined =
         includeData && dataBlob ? { [`data/${dataBlob.filename}`]: dataBlob.blob } : undefined;
-      
+
       const result = await pushDeployKit(
         ghToken, ghRepo, ghBranch, ghBasePath, files, commitMsg,
         willCreatePR, `Publish: ${publishModel.name}`, binaryFiles
@@ -158,14 +173,14 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
   };
 
   const handleDownloadZip = async () => {
-    const publishModel = { ...model, layers: model.layers.filter(l => selectedLayers.has(l.id)) };
-    
+    const publishModel = buildPublishModel(model, selectedLayers);
+
     // Find the actual primary key column for each layer
     const layerMappings = Object.fromEntries(
       publishModel.layers.map(l => {
         const summaryLayer = summary.layers.find(sl => sl.tableName === l.name);
         const primaryKeyColumn = summaryLayer?.primaryKeyColumn || 'fid';
-        
+
         return [l.id, {
           sourceTable: l.name, // Use actual table name from GeoPackage import
           fieldMappings: {},
@@ -173,7 +188,7 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
         }];
       })
     );
-    
+
     const source = {
       type: 'geopackage' as const,
       config: { filename: summary.filename },
@@ -401,22 +416,22 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.datasetUrl}</label>
-              <input 
-                type="url" 
-                value={meta.url || ''} 
-                onChange={e => updateMeta({ url: e.target.value })} 
+              <input
+                type="url"
+                value={meta.url || ''}
+                onChange={e => updateMeta({ url: e.target.value })}
                 placeholder={md.datasetUrlPlaceholder}
-                className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" 
+                className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all"
               />
             </div>
             <div className="space-y-1.5">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.termsOfService}</label>
-              <input 
-                type="url" 
-                value={meta.termsOfService || ''} 
-                onChange={e => updateMeta({ termsOfService: e.target.value })} 
+              <input
+                type="url"
+                value={meta.termsOfService || ''}
+                onChange={e => updateMeta({ termsOfService: e.target.value })}
                 placeholder={md.termsOfServicePlaceholder}
-                className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" 
+                className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all"
               />
             </div>
           </div>
@@ -629,9 +644,9 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
           {dataBlob && (
             <div className={`p-5 rounded-2xl border-2 transition-all ${includeData ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
               <label className="flex items-start gap-4 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={includeData} 
+                <input
+                  type="checkbox"
+                  checked={includeData}
                   onChange={e => setIncludeData(e.target.checked)}
                   className="mt-1 w-5 h-5 rounded-lg border-2 border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                 />
