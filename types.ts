@@ -58,6 +58,7 @@ export interface LayerStyle {
   hatchStyle?: 'solid' | 'horizontal' | 'vertical' | 'cross' | 'b_diagonal' | 'f_diagonal' | 'diagonal_x';
   hatchThickness?: number;
   hatchSpacing?: number;
+  hatchLineCount?: number;
 }
 
 export interface LayerConstraint {
