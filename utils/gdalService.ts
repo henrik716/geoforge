@@ -413,6 +413,34 @@ const extractEpsgFromSrs = (srs?: GdalGeometryFieldInfo['srs']): number | null =
 // ============================================================
 
 /**
+ * Split GeoJSON features by geometry type into separate FeatureCollections.
+ * This allows mixed-geometry GeoJSON files (e.g., from Overpass Turbo) to be
+ * properly organized into separate layers by geometry type.
+ */
+const splitGeoJsonByGeometryType = (geojson: any): Record<string, any> => {
+  const features = geojson.features || (Array.isArray(geojson) ? geojson : []);
+  const byGeometryType: Record<string, any[]> = {};
+
+  features.forEach((feature: any) => {
+    const geomType = feature.geometry?.type || 'Unknown';
+    if (!byGeometryType[geomType]) {
+      byGeometryType[geomType] = [];
+    }
+    byGeometryType[geomType].push(feature);
+  });
+
+  const result: Record<string, any> = {};
+  Object.entries(byGeometryType).forEach(([geomType, feats]) => {
+    result[geomType] = {
+      type: 'FeatureCollection',
+      features: feats,
+    };
+  });
+
+  return result;
+};
+
+/**
  * Convert GdalDatasetInfo to a GeoForge DataModel + InferredDataSummary.
  * This is the main bridge between GDAL output and the existing GeoForge types.
  */
@@ -515,6 +543,7 @@ export const gdalInfoToModel = (
 /**
  * Drop-in replacement for processGpkgFile that supports ANY format.
  * Opens files with GDAL, introspects, and returns a DataModel + summary.
+ * Special handling: For GeoJSON with mixed geometry types, splits into separate layers.
  */
 export const processFilesWithGdal = async (
   files: File | File[]
@@ -522,7 +551,40 @@ export const processFilesWithGdal = async (
   const fileArray = Array.isArray(files) ? files : [files];
   const mainFile = fileArray[0];
 
-  const datasets = await inspectFiles(fileArray);
+  // Special handling for GeoJSON files with mixed geometry types
+  const isGeoJson = mainFile.name.endsWith('.geojson') || mainFile.name.endsWith('.json');
+  let filesToProcess = fileArray;
+
+  if (isGeoJson) {
+    try {
+      const text = await mainFile.text();
+      const geojson = JSON.parse(text);
+      const features = geojson.features || (Array.isArray(geojson) ? geojson : []);
+      
+      // Check if we have mixed geometry types
+      const geometryTypes = new Set(features.map((f: any) => f.geometry?.type));
+      
+      if (geometryTypes.size > 1) {
+        // Split by geometry type and create separate files
+        const splitByType = splitGeoJsonByGeometryType(geojson);
+        filesToProcess = [];
+        
+        for (const [geomType, geojsonData] of Object.entries(splitByType)) {
+          const splitJson = JSON.stringify(geojsonData);
+          const blob = new Blob([splitJson], { type: 'application/json' });
+          const layerName = geomType.toLowerCase();
+          const splitFile = new File([blob], `${layerName}.geojson`, { type: 'application/json' });
+          filesToProcess.push(splitFile);
+        }
+        
+        console.log(`🔍 Split mixed-geometry GeoJSON into ${filesToProcess.length} layers by type`);
+      }
+    } catch (err) {
+      console.warn('Could not pre-process GeoJSON for geometry splitting, continuing with normal flow:', err);
+    }
+  }
+
+  const datasets = await inspectFiles(filesToProcess);
   if (datasets.length === 0) {
     throw new Error(`GDAL could not read: ${mainFile.name}`);
   }

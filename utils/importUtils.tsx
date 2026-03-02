@@ -539,26 +539,5 @@ export const processAnyFile = async (
     return processGpkgFile(mainFile);
   }
 
-  // Fallback: GeoJSON
-  if (ext === 'geojson' || ext === 'json') {
-    const text = await mainFile.text();
-    const json = JSON.parse(text);
-    const model = processGeoJsonToModel(json, mainFile.name);
-    return {
-      model,
-      summary: {
-        filename: mainFile.name,
-        layers: model.layers.map(l => ({
-          tableName: l.name,
-          featureCount: json.features?.length || 0,
-          geometryType: l.geometryType,
-          columnCount: l.properties.length,
-          srid: 4326,
-        })),
-        srid: 4326,
-      }
-    };
-  }
-
   throw new Error(`Unsupported file format: .${ext}. Supported formats: GeoPackage (.gpkg), Shapefile (.shp), GeoJSON, GML, KML, FlatGeobuf, and more (requires GDAL).`);
 };
