@@ -424,7 +424,9 @@ export const generateQgisProject = (
         ${buildSpatialRefSys(authid)}
       </crs>
       <renderer-v2 type="singleSymbol" enableorderby="0" forceraster="0">
-        ${symbolXml}
+        <symbols>
+          ${symbolXml}
+        </symbols>
       </renderer-v2>
     </maplayer>`);
 
