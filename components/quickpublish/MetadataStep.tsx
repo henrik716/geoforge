@@ -3,7 +3,7 @@ import { X, ArrowRight, Sparkles } from 'lucide-react';
 import { DataModel, ModelMetadata } from '../../types';
 import { InferredDataSummary } from '../../utils/importUtils';
 import {
-  generateModelAbstract, suggestTheme, suggestKeywords,
+  generateModelAbstract, suggestTheme, suggestKeywords, hasApiKey,
 } from '../../utils/aiService';
 import { useAiContext } from '../../hooks/useAiContext';
 
@@ -56,6 +56,13 @@ const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateMod
   }));
 
   const handleGenerateDesc = () => {
+    if (!hasApiKey()) {
+      window.dispatchEvent(new CustomEvent('ai-configure-required', {
+        detail: { operation: 'description' }
+      }));
+      return;
+    }
+    
     aiContext.setLoading('description', 'Generating description…');
     generateModelAbstract({ modelName: model.name, layers: getLayers(), lang }).then(result => {
       onUpdateModel({ ...model, description: result });
@@ -66,6 +73,13 @@ const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateMod
   };
 
   const handleSuggestTheme = () => {
+    if (!hasApiKey()) {
+      window.dispatchEvent(new CustomEvent('ai-configure-required', {
+        detail: { operation: 'theme' }
+      }));
+      return;
+    }
+    
     aiContext.setLoading('theme', 'Suggesting theme…');
     suggestTheme({ modelName: model.name, layers: getLayers(), lang, validThemes: md.themes || {} }).then(result => {
       updateMeta({ theme: result.trim() });
@@ -76,6 +90,13 @@ const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateMod
   };
 
   const handleSuggestKeywords = () => {
+    if (!hasApiKey()) {
+      window.dispatchEvent(new CustomEvent('ai-configure-required', {
+        detail: { operation: 'keywords' }
+      }));
+      return;
+    }
+    
     aiContext.setLoading('keywords', 'Generating keywords…');
     suggestKeywords({ modelName: model.name, layers: getLayers(), lang }).then(keywords => {
       updateMeta({ keywords: [...new Set([...(meta.keywords || []), ...keywords])] });
