@@ -322,9 +322,14 @@ export const generateQgisProject = (
   const mapLayers: string[] = [];
   const treeLayers: string[] = [];
 
-  model.layers
-    .filter(l => l.geometryType !== 'None')
-    .forEach((layer, index) => {
+  // Get layers in rendering order if specified, otherwise use original order
+  const layersInOrder = model.renderingOrder && model.renderingOrder.length > 0
+    ? model.renderingOrder
+        .map(id => model.layers.find(l => l.id === id))
+        .filter(l => l && l.geometryType !== 'None') as Layer[]
+    : model.layers.filter(l => l.geometryType !== 'None');
+
+  layersInOrder.forEach((layer, index) => {
       const tbl = getTableName(layer);
       const mapping = source?.layerMappings?.[layer.id];
       const sourceTable = mapping?.sourceTable || tbl;

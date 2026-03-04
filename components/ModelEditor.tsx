@@ -3,12 +3,14 @@ import {
   Plus, Trash2, Layers, LayoutList, MapPin, Globe, Palette, MousePointer2,
   GitCommit, Square, Hash, Shapes, Package,
   ChevronDown, ChevronUp, Edit3, Eye, Box,
-  Database
+  Database, GripVertical, RotateCcw
 } from 'lucide-react';
 import { DataModel, Layer, ModelProperty, GeometryType, SharedType } from '../types';
 import { createEmptyProperty, createEmptyLayer, COLORS } from '../constants';
 import { compareModels, getStructuredChanges } from '../utils/diffUtils';
 import { fetchModelHistory, fetchModelAtCommit, CommitInfo } from '../utils/githubService';
+import { useDragAndDropReorder } from '../hooks/useDragAndDropReorder';
+import { useRenderingOrder } from '../hooks/useRenderingOrder';
 import PropertyEditor from './PropertyEditor';
 import StylePreview from './StylePreview';
 import LayerStyleEditor from './LayerStyleEditor';
@@ -88,6 +90,7 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
   const [activeSharedTypeId, setActiveSharedTypeId] = useState<string>("");
   const [isStylingOpen, setIsStylingOpen] = useState(false);
   const [isMetadataOpen, setIsMetadataOpen] = useState(false);
+  const [isRenderingOrderOpen, setIsRenderingOrderOpen] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
   const [commitHistory, setCommitHistory] = useState<CommitInfo[]>([]);
   const [isFetchingHistory, setIsFetchingHistory] = useState(false);
@@ -280,10 +283,26 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
     } else {
       return;
     }
-    
     handleUpdateSharedType({ properties: newProps });
   };
 
+  // Use custom hooks for rendering order and drag-and-drop
+  const { layerOrder, resetOrder, handleReorder } = useRenderingOrder({ model, onUpdate });
+  
+  const {
+    draggedItem: draggedLayer,
+    dragOverItem: dragOverLayer,
+    handleDragStart,
+    handleDragOver,
+    handleDragEnter,
+    handleDragLeave,
+    handleDrop,
+    handleDragEnd
+  } = useDragAndDropReorder<string>({
+    items: layerOrder,
+    onReorder: handleReorder,
+    getItemId: (id) => id
+  });
 
   return (
     <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 lg:p-12 w-full custom-scrollbar scroll-smooth">
@@ -422,6 +441,84 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
               <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">{t.layers}</h3>
               <button onClick={handleAddLayer} className="text-xs font-black text-indigo-600 hover:underline flex items-center gap-1.5 shrink-0"><Plus size={14}/> {t.addLayer}</button>
             </div>
+            
+            {/* Rendering order interface */}
+            <div className="bg-white rounded-2xl border border-slate-200 mb-4">
+              <button 
+                onClick={() => setIsRenderingOrderOpen(!isRenderingOrderOpen)}
+                className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-50 transition-all rounded-t-2xl"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-100 flex items-center justify-center">
+                    <Layers size={16} className="text-indigo-600" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-700">{t.quickPublish?.renderingOrder || 'Rendering Order'}</h4>
+                    <span className="text-[9px] text-slate-400 font-medium">{t.quickPublish?.dragToReorder || 'Drag to reorder'}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {isRenderingOrderOpen ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+                </div>
+              </button>
+              
+              {isRenderingOrderOpen && (
+                <div 
+                  className="px-4 pb-4"
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // Custom hook handles state cleanup automatically
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-[9px] text-slate-400 font-medium">
+                      {layerOrder.length} {layerOrder.length === 1 ? 'layer' : 'layers'}
+                    </div>
+                    <button onClick={resetOrder} className="text-xs font-black text-slate-500 hover:text-slate-700 flex items-center gap-1.5 shrink-0">
+                      <RotateCcw size={12} />
+                      {t.quickPublish?.resetOrder || 'Reset'}
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    {layerOrder.map(layerId => {
+                      const layer = model.layers.find(l => l.id === layerId);
+                      if (!layer) return null;
+                      const isActive = activeLayerId === layerId;
+                      const isDragged = draggedLayer === layerId;
+                      const isDragOver = dragOverLayer === layerId;
+                      
+                      return (
+                        <div
+                          key={layerId}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, layerId)}
+                          onDragOver={handleDragOver}
+                          onDragEnter={(e) => handleDragEnter(e, layerId)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, layerId)}
+                          onDragEnd={handleDragEnd}
+                          onClick={() => setActiveLayerId(layerId)}
+                          className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all cursor-move ${
+                            isDragged ? 'opacity-50 scale-95' : ''
+                          } ${isDragOver ? 'border-indigo-400 bg-indigo-50' : 'border-slate-100 bg-slate-50'} ${
+                            isActive ? 'ring-2 ring-indigo-500 bg-indigo-50' : ''
+                          } hover:border-slate-300 hover:bg-white`}
+                        >
+                          <GripVertical size={14} className="text-slate-400" />
+                          <div className="w-3 h-3 rounded-full border border-white/30 shrink-0" style={{ backgroundColor: layer.style?.simpleColor || '#ccc' }} />
+                          <span className="text-sm font-black text-slate-900 truncate flex-1">{layer.name || "Untitled Layer"}</span>
+                          <div className="w-2 h-2 rounded-full bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {/* Original layer tabs for compatibility */}
             <div className="flex flex-wrap gap-2 md:gap-3 px-1">
                 {displayLayers.map(layer => {
                   const isGhost = (layer as any).isGhost;
