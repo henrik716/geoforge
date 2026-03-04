@@ -213,6 +213,7 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
           onBack={() => setStep(1)}
           onNext={() => setStep(3)}
           t={t}
+          lang={lang}
         />
       )}
 

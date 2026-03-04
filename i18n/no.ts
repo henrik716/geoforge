@@ -628,5 +628,24 @@ export const no = {
         managedDbDesc: "For PostGIS-tabellene dine. Leverandøren håndterer sikkerhetsoppdateringer og sikkerhetskopi døgnet rundt, slik at dataene alltid er tilgjengelige.",
         managedDbOptions: "Anbefalinger: Google Cloud SQL (integrert med GIS), DigitalOcean Managed Database (enkel prismodell)."
       }
-    }
+    },
+    ai: {
+      generateDescription: 'Generer beskrivelse',
+      suggestType: 'Foreslå datatype',
+      inferConstraints: 'Foreslå begrensninger',
+      generateAbstract: 'Generer sammendrag',
+      enterKey: 'Skriv inn AI API-nøkkel',
+      saveKey: 'Lagre nøkkel',
+      keyStoredLocally: 'Lagres kun i nettleseren. Sendes aldri til noen server.',
+      keyRequired: 'AI-nøkkel mangler — klikk for å konfigurere',
+      applyConstraints: 'Bruk forslag',
+      dismiss: 'Avvis',
+      generating: 'Genererer…',
+      error: 'AI-feil — klikk for å prøve igjen',
+      errorInvalidKey: 'Ugyldig API-nøkkel.',
+      suggestedConstraints: 'Foreslåtte begrensninger',
+      provider: 'Leverandør',
+      suggestTheme: 'Foreslå tema',
+      suggestKeywords: 'Foreslå nøkkelord',
+    },
   };

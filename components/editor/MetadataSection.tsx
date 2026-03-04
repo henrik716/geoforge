@@ -1,6 +1,11 @@
-import React from 'react';
-import { FileText, ChevronDown, ChevronUp, X } from 'lucide-react';
+import React, { useState } from 'react';
+import { FileText, ChevronDown, ChevronUp, X, Sparkles } from 'lucide-react';
 import { DataModel, ModelMetadata } from '../../types';
+import {
+  AiProvider, AiAuthError,
+  getProvider, setProvider, getApiKey, saveApiKey,
+  generateModelAbstract, suggestTheme, suggestKeywords,
+} from '../../utils/aiService';
 
 interface MetadataSectionProps {
   model: DataModel;
@@ -11,7 +16,83 @@ interface MetadataSectionProps {
   lang: string;
 }
 
+type MetaFeature = 'abstract' | 'theme' | 'keywords';
+
+const defaultMeta: ModelMetadata = {
+  contactName: '', contactEmail: '', contactOrganization: '',
+  keywords: [], theme: '', license: 'CC-BY-4.0',
+  accessRights: 'public', purpose: '', accrualPeriodicity: 'unknown',
+  spatialExtent: { westBoundLongitude: '', eastBoundLongitude: '', southBoundLatitude: '', northBoundLatitude: '' },
+  temporalExtentFrom: '', temporalExtentTo: '',
+};
+
 const MetadataSection: React.FC<MetadataSectionProps> = ({ model, onUpdate, isOpen, onToggle, t, lang }) => {
+  const [aiLoading, setAiLoading] = useState<MetaFeature | null>(null);
+  const [aiError, setAiError] = useState<MetaFeature | null>(null);
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [keyDraft, setKeyDraft] = useState('');
+  const [providerDraft, setProviderDraft] = useState<AiProvider>(getProvider());
+  const [pendingFeature, setPendingFeature] = useState<MetaFeature | null>(null);
+
+  const getLayers = () => model.layers.map(l => ({
+    name: l.name,
+    properties: (l.properties || []).map(p => ({ name: p.name, type: p.type })),
+  }));
+
+  const runAi = async (feature: MetaFeature, action: () => Promise<void>) => {
+    if (!getApiKey()) {
+      setProviderDraft(getProvider());
+      setPendingFeature(feature);
+      setShowKeyInput(true);
+      return;
+    }
+    setAiLoading(feature);
+    setAiError(null);
+    try {
+      await action();
+    } catch (e) {
+      if (e instanceof AiAuthError) {
+        setProviderDraft(getProvider());
+        setKeyDraft('');
+        setPendingFeature(feature);
+        setShowKeyInput(true);
+      } else {
+        setAiError(feature);
+      }
+    } finally {
+      setAiLoading(null);
+    }
+  };
+
+  const handleGenerateAbstract = () => runAi('abstract', async () => {
+    const result = await generateModelAbstract({ modelName: model.name, layers: getLayers(), lang });
+    onUpdate({ ...model, metadata: { ...(model.metadata || defaultMeta), purpose: result } });
+  });
+
+  const handleSuggestTheme = () => runAi('theme', async () => {
+    const result = await suggestTheme({ modelName: model.name, layers: getLayers(), lang, validThemes: t.metadata?.themes || {} });
+    onUpdate({ ...model, metadata: { ...(model.metadata || defaultMeta), theme: result.trim() } });
+  });
+
+  const handleSuggestKeywords = () => runAi('keywords', async () => {
+    const result = await suggestKeywords({ modelName: model.name, layers: getLayers(), lang });
+    const cur = model.metadata || defaultMeta;
+    onUpdate({ ...model, metadata: { ...cur, keywords: [...new Set([...(cur.keywords || []), ...result])] } });
+  });
+
+  const handleSaveKey = () => {
+    if (!keyDraft.trim()) return;
+    saveApiKey(keyDraft, providerDraft);
+    setProvider(providerDraft);
+    setShowKeyInput(false);
+    setKeyDraft('');
+    const feature = pendingFeature;
+    setPendingFeature(null);
+    if (feature === 'abstract') handleGenerateAbstract();
+    else if (feature === 'theme') handleSuggestTheme();
+    else if (feature === 'keywords') handleSuggestKeywords();
+  };
+
   return (
           <section className="bg-white rounded-[24px] md:rounded-[32px] border border-slate-200 shadow-sm mb-6 md:mb-10 overflow-hidden transition-all">
             <button
@@ -102,7 +183,13 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({ model, onUpdate, isOp
 
                   {/* Keywords */}
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{md.keywords}</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{md.keywords}</label>
+                      <button type="button" onClick={handleSuggestKeywords} disabled={aiLoading !== null} className={`flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg transition-all ${aiError === 'keywords' ? 'text-rose-400 bg-rose-50' : 'text-teal-500 hover:text-teal-700 hover:bg-teal-50'} ${aiLoading !== null ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        <Sparkles size={10} className={aiLoading === 'keywords' ? 'animate-pulse' : ''} />
+                        {aiLoading === 'keywords' ? (t.ai?.generating || 'Generating…') : (t.ai?.suggestKeywords || 'Suggest keywords')}
+                      </button>
+                    </div>
                     <div className="flex flex-wrap gap-2 mb-2">
                       {(meta.keywords || []).map((kw, i) => (
                         <span key={i} className="inline-flex items-center gap-1.5 bg-teal-50 text-teal-700 border border-teal-200 px-3 py-1.5 rounded-xl text-xs font-bold">
@@ -132,7 +219,13 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({ model, onUpdate, isOp
                   {/* Classification row */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.theme}</label>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{md.theme}</label>
+                        <button type="button" onClick={handleSuggestTheme} disabled={aiLoading !== null} className={`flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg transition-all ${aiError === 'theme' ? 'text-rose-400 bg-rose-50' : 'text-teal-500 hover:text-teal-700 hover:bg-teal-50'} ${aiLoading !== null ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                          <Sparkles size={10} className={aiLoading === 'theme' ? 'animate-pulse' : ''} />
+                          {aiLoading === 'theme' ? (t.ai?.generating || 'Generating…') : (t.ai?.suggestTheme || 'Suggest theme')}
+                        </button>
+                      </div>
                       <select value={meta.theme} onChange={e => updateMeta({ theme: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-sm font-bold appearance-none focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all cursor-pointer">
                         <option value="">—</option>
                         {Object.entries(md.themes || {}).map(([key, label]) => (
@@ -160,9 +253,58 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({ model, onUpdate, isOp
 
                   {/* Purpose */}
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2 block">{md.purpose}</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 block">{md.purpose}</label>
+                      <button
+                        type="button"
+                        onClick={handleGenerateAbstract}
+                        disabled={aiLoading !== null}
+                        title={t.ai?.generateAbstract || 'Generate abstract'}
+                        className={`flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg transition-all ${aiError === 'abstract' ? 'text-rose-400 bg-rose-50' : 'text-teal-500 hover:text-teal-700 hover:bg-teal-50'} ${aiLoading !== null ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <Sparkles size={11} className={aiLoading === 'abstract' ? 'animate-pulse' : ''} />
+                        {aiLoading === 'abstract' ? (t.ai?.generating || 'Generating…') : (t.ai?.generateAbstract || 'Generate abstract')}
+                      </button>
+                    </div>
                     <textarea value={meta.purpose} onChange={e => updateMeta({ purpose: e.target.value })} placeholder={md.purposePlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] px-4 py-3 text-xs md:text-sm min-h-[60px] focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 outline-none transition-all resize-none leading-relaxed" />
                   </div>
+
+                  {showKeyInput && (
+                    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4" onClick={() => setShowKeyInput(false)}>
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 w-80 animate-in zoom-in-95 duration-150" onClick={e => e.stopPropagation()}>
+                        <p className="text-xs font-black text-slate-700 mb-4">{t.ai?.enterKey || 'Enter your AI API key'}</p>
+                        <div className="flex gap-2 mb-4">
+                          {(['claude', 'gemini'] as AiProvider[]).map(p => (
+                            <button
+                              key={p}
+                              onClick={() => { setProviderDraft(p); setKeyDraft(''); }}
+                              className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${providerDraft === p ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                            >
+                              {p === 'claude' ? 'Claude' : 'Gemini'}
+                            </button>
+                          ))}
+                        </div>
+                        <input
+                          type="password"
+                          placeholder={providerDraft === 'claude' ? 'sk-ant-api03-…' : 'AIza…'}
+                          value={keyDraft}
+                          onChange={e => setKeyDraft(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-teal-500 mb-3"
+                          autoFocus
+                        />
+                        <div className="flex items-center gap-2">
+                          <button onClick={handleSaveKey} className="flex-1 bg-teal-600 text-white text-[10px] font-black py-3 rounded-xl hover:bg-teal-700 transition-colors">
+                            {t.ai?.saveKey || 'Save key'}
+                          </button>
+                          <button onClick={() => setShowKeyInput(false)} className="px-4 py-3 text-slate-400 text-[10px] font-black hover:text-slate-600">
+                            {t.cancel || 'Cancel'}
+                          </button>
+                        </div>
+                        <p className="text-[9px] text-slate-400 mt-3 leading-relaxed">{t.ai?.keyStoredLocally || 'Stored in your browser only.'}</p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Frequency */}
                   <div>

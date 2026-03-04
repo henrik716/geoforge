@@ -1,13 +1,18 @@
 import React, { useState, useRef } from 'react';
 import {
   ChevronDown, ChevronUp, Trash2, Asterisk,
-  ArrowUp, ArrowDown, Lock, Plus, Link, CornerDownRight
+  ArrowUp, ArrowDown, Lock, Plus, Link, CornerDownRight, Sparkles
 } from 'lucide-react';
 import { ModelProperty, PropertyType, PropertyConstraints, SharedType } from '../types';
 import { TYPE_CONFIG, createEmptyProperty } from '../constants';
 import { ModelChange } from '../utils/diffUtils';
 import ConstraintsEditor from './property/ConstraintsEditor';
 import CodelistEditor from './property/CodelistEditor';
+import {
+  AiProvider, AiConstraintSuggestion,
+  getProvider, setProvider, getApiKey, saveApiKey, AiAuthError,
+  generatePropertyDescription, suggestFieldType, inferConstraints,
+} from '../utils/aiService';
 
 interface PropertyEditorProps {
   prop: ModelProperty;
@@ -23,8 +28,30 @@ interface PropertyEditorProps {
   change?: ModelChange;
   isGhost?: boolean;
   reviewMode?: boolean;
-  depth?: number; 
+  depth?: number;
+  layerName?: string;
+  lang?: string;
 }
+
+type AiFeature = 'desc' | 'type' | 'constraints';
+
+const AiButton: React.FC<{
+  onClick: () => void;
+  isLoading: boolean;
+  hasError: boolean;
+  tooltip: string;
+  className?: string;
+}> = ({ onClick, isLoading, hasError, tooltip, className = '' }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={tooltip}
+    disabled={isLoading}
+    className={`flex items-center justify-center w-7 h-7 rounded-lg transition-all shrink-0 ${hasError ? 'text-rose-400 hover:text-rose-600 bg-rose-50' : 'text-indigo-300 hover:text-indigo-600 hover:bg-indigo-50'} ${isLoading ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}
+  >
+    <Sparkles size={14} className={isLoading ? 'animate-pulse' : ''} />
+  </button>
+);
 
 const PropDiffField: React.FC<{
   label: string;
@@ -51,12 +78,110 @@ const PropDiffField: React.FC<{
   );
 };
 
-const PropertyEditor: React.FC<PropertyEditorProps> = ({ 
-  prop, baselineProp, onUpdate, onDelete, onMove, isFirst, isLast, t, allLayers, sharedTypes = [], change, isGhost, reviewMode, depth = 0 
+const PropertyEditor: React.FC<PropertyEditorProps> = ({
+  prop, baselineProp, onUpdate, onDelete, onMove, isFirst, isLast, t, allLayers, sharedTypes = [], change, isGhost, reviewMode, depth = 0, layerName = '', lang = 'no'
 }) => {
   const [isOpen, setIsOpen] = useState(prop.name === "" || depth > 0);
   const config = TYPE_CONFIG[prop.type] || TYPE_CONFIG.string;
   const nameInputRef = useRef<HTMLInputElement>(null);
+
+  // AI state
+  const [aiLoading, setAiLoading] = useState<AiFeature | null>(null);
+  const [aiError, setAiError] = useState<AiFeature | null>(null);
+  const [constraintSuggestion, setConstraintSuggestion] = useState<AiConstraintSuggestion | null>(null);
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [keyDraft, setKeyDraft] = useState('');
+  const [providerDraft, setProviderDraft] = useState<AiProvider>(getProvider());
+  const [pendingAction, setPendingAction] = useState<{ feature: AiFeature; fn: () => Promise<void> } | null>(null);
+
+  const runAi = async (feature: AiFeature, action: () => Promise<void>) => {
+    if (!getApiKey()) {
+      setPendingAction({ feature, fn: action });
+      setProviderDraft(getProvider());
+      setShowKeyInput(true);
+      return;
+    }
+    setAiLoading(feature);
+    setAiError(null);
+    try {
+      await action();
+    } catch (e) {
+      if (e instanceof AiAuthError) {
+        setPendingAction({ feature, fn: action });
+        setProviderDraft(getProvider());
+        setKeyDraft('');
+        setShowKeyInput(true);
+      } else {
+        setAiError(feature);
+      }
+    } finally {
+      setAiLoading(null);
+    }
+  };
+
+  const handleSaveKey = async () => {
+    if (!keyDraft.trim()) return;
+    saveApiKey(keyDraft, providerDraft);
+    setProvider(providerDraft);
+    setShowKeyInput(false);
+    setKeyDraft('');
+    if (pendingAction) {
+      const { feature, fn } = pendingAction;
+      setPendingAction(null);
+      setAiLoading(feature);
+      setAiError(null);
+      try {
+        await fn();
+      } catch {
+        setAiError(feature);
+      } finally {
+        setAiLoading(null);
+      }
+    }
+  };
+
+  const handleGenerateDescription = () => runAi('desc', async () => {
+    const result = await generatePropertyDescription({
+      fieldName: prop.name || 'field',
+      fieldType: prop.type,
+      layerName,
+      lang,
+    });
+    handleUpdate({ description: result });
+  });
+
+  const handleSuggestType = () => runAi('type', async () => {
+    const result = await suggestFieldType({
+      fieldName: prop.name || 'field',
+      description: prop.description || '',
+      lang,
+    });
+    const validTypes: PropertyType[] = ['string', 'number', 'integer', 'boolean', 'date', 'geometry', 'codelist', 'json', 'object', 'array'];
+    const cleaned = result.trim().toLowerCase() as PropertyType;
+    if (validTypes.includes(cleaned)) {
+      handleUpdate({ type: cleaned, defaultValue: '', constraints: {} });
+    }
+  });
+
+  const handleInferConstraints = () => runAi('constraints', async () => {
+    const result = await inferConstraints({
+      fieldName: prop.name || 'field',
+      fieldType: prop.type,
+      description: prop.description || '',
+      lang,
+    });
+    setConstraintSuggestion(result);
+  });
+
+  const handleApplyConstraints = () => {
+    if (!constraintSuggestion) return;
+    const { required, ...rest } = constraintSuggestion;
+    handleUpdate({
+      constraints: { ...(prop.constraints || {}), ...rest },
+      ...(required !== undefined ? { required } : {}),
+    });
+    setConstraintSuggestion(null);
+  };
 
   const c = prop.constraints || {};
   const hasActiveConstraints = Object.keys(c).some(k => {
@@ -212,13 +337,21 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 items-end">
             <PropDiffField label={t.propType} currentValue={prop.type} baselineValue={baselineProp?.type} reviewMode={!!reviewMode}>
-              <div className="relative">
-                <select value={prop.type} onChange={e => handleUpdate({ type: e.target.value as PropertyType, defaultValue: '', constraints: {} })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all appearance-none cursor-pointer h-12">
-                  {Object.entries(t.types).filter(([k]) => k !== 'geometry').map(([k, v]) => (
-                      <option key={k} value={k}>{v as string}</option>
-                  ))}
-                </select>
-                <ChevronDown size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <select value={prop.type} onChange={e => handleUpdate({ type: e.target.value as PropertyType, defaultValue: '', constraints: {} })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all appearance-none cursor-pointer h-12">
+                    {Object.entries(t.types).filter(([k]) => k !== 'geometry').map(([k, v]) => (
+                        <option key={k} value={k}>{v as string}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+                <AiButton
+                  onClick={handleSuggestType}
+                  isLoading={aiLoading === 'type'}
+                  hasError={aiError === 'type'}
+                  tooltip={t.ai?.suggestType || 'Suggest type'}
+                />
               </div>
             </PropDiffField>
 
@@ -249,7 +382,53 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
             </PropDiffField>
           )}
 
-          <ConstraintsEditor prop={prop} onUpdate={onUpdate} t={t} />
+          <div className="space-y-2">
+            <div className="flex items-center justify-end">
+              <AiButton
+                onClick={handleInferConstraints}
+                isLoading={aiLoading === 'constraints'}
+                hasError={aiError === 'constraints'}
+                tooltip={t.ai?.inferConstraints || 'Suggest constraints'}
+              />
+            </div>
+            <ConstraintsEditor prop={prop} onUpdate={onUpdate} t={t} />
+            {constraintSuggestion && Object.keys(constraintSuggestion).length > 0 && (
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 space-y-3 animate-in slide-in-from-top-1 duration-200">
+                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">{t.ai?.suggestedConstraints || 'Suggested constraints'}</p>
+                <div className="flex flex-wrap gap-2">
+                  {constraintSuggestion.required !== undefined && (
+                    <span className="bg-white border border-indigo-200 rounded-lg px-2 py-1 text-[10px] font-bold text-indigo-700">NOT NULL: {constraintSuggestion.required ? '✓' : '✗'}</span>
+                  )}
+                  {constraintSuggestion.min !== undefined && (
+                    <span className="bg-white border border-indigo-200 rounded-lg px-2 py-1 text-[10px] font-bold text-indigo-700">Min: {constraintSuggestion.min}</span>
+                  )}
+                  {constraintSuggestion.max !== undefined && (
+                    <span className="bg-white border border-indigo-200 rounded-lg px-2 py-1 text-[10px] font-bold text-indigo-700">Max: {constraintSuggestion.max}</span>
+                  )}
+                  {constraintSuggestion.minLength !== undefined && (
+                    <span className="bg-white border border-indigo-200 rounded-lg px-2 py-1 text-[10px] font-bold text-indigo-700">MinLen: {constraintSuggestion.minLength}</span>
+                  )}
+                  {constraintSuggestion.maxLength !== undefined && (
+                    <span className="bg-white border border-indigo-200 rounded-lg px-2 py-1 text-[10px] font-bold text-indigo-700">MaxLen: {constraintSuggestion.maxLength}</span>
+                  )}
+                  {constraintSuggestion.pattern && (
+                    <span className="bg-white border border-indigo-200 rounded-lg px-2 py-1 text-[10px] font-mono text-indigo-700">{constraintSuggestion.pattern}</span>
+                  )}
+                  {(constraintSuggestion.enumeration || []).map((v, i) => (
+                    <span key={i} className="bg-white border border-indigo-200 rounded-lg px-2 py-1 text-[10px] font-bold text-indigo-700">{v}</span>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={handleApplyConstraints} className="text-[10px] font-black bg-indigo-600 text-white px-3 py-2 rounded-lg hover:bg-indigo-700 transition-colors">
+                    {t.ai?.applyConstraints || 'Apply suggestions'}
+                  </button>
+                  <button onClick={() => setConstraintSuggestion(null)} className="text-[10px] font-black text-indigo-400 hover:text-indigo-600 px-2 py-2">
+                    {t.ai?.dismiss || 'Dismiss'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {prop.type === 'relation' && (
             <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-5">
@@ -316,8 +495,54 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
           )}
 
           <PropDiffField label={t.propDescription} currentValue={prop.description} baselineValue={baselineProp?.description} reviewMode={!!reviewMode}>
-            <textarea placeholder={t.propDescriptionPlaceholder} value={prop.description} onChange={e => handleUpdate({ description: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all min-h-[100px] resize-none leading-relaxed" />
+            <div className="relative">
+              <textarea placeholder={t.propDescriptionPlaceholder} value={prop.description} onChange={e => handleUpdate({ description: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 pr-10 text-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all min-h-[100px] resize-none leading-relaxed" />
+              <AiButton
+                onClick={handleGenerateDescription}
+                isLoading={aiLoading === 'desc'}
+                hasError={aiError === 'desc'}
+                tooltip={t.ai?.generateDescription || 'Generate description'}
+                className="absolute top-2 right-2"
+              />
+            </div>
           </PropDiffField>
+
+          {showKeyInput && (
+            <div className="fixed inset-0 z-[999] flex items-center justify-center p-4" onClick={() => setShowKeyInput(false)}>
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 w-80 animate-in zoom-in-95 duration-150" onClick={e => e.stopPropagation()}>
+                <p className="text-xs font-black text-slate-700 mb-4">{t.ai?.enterKey || 'Enter your AI API key'}</p>
+                <div className="flex gap-2 mb-4">
+                  {(['claude', 'gemini'] as AiProvider[]).map(p => (
+                    <button
+                      key={p}
+                      onClick={() => { setProviderDraft(p); setKeyDraft(''); }}
+                      className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${providerDraft === p ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                    >
+                      {p === 'claude' ? 'Claude' : 'Gemini'}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="password"
+                  placeholder={providerDraft === 'claude' ? 'sk-ant-api03-…' : 'AIza…'}
+                  value={keyDraft}
+                  onChange={e => setKeyDraft(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-indigo-500 mb-3"
+                  autoFocus
+                />
+                <div className="flex items-center gap-2">
+                  <button onClick={handleSaveKey} className="flex-1 bg-indigo-600 text-white text-[10px] font-black py-3 rounded-xl hover:bg-indigo-700 transition-colors">
+                    {t.ai?.saveKey || 'Save key'}
+                  </button>
+                  <button onClick={() => setShowKeyInput(false)} className="px-4 py-3 text-slate-400 text-[10px] font-black hover:text-slate-600">
+                    {t.cancel || 'Cancel'}
+                  </button>
+                </div>
+                <p className="text-[9px] text-slate-400 mt-3 leading-relaxed">{t.ai?.keyStoredLocally || 'Stored in your browser only.'}</p>
+              </div>
+            </div>
+          )}
 
           {/* --- NESTED SUB-PROPERTIES (OBJECT/ARRAY) --- */}
           {(prop.type === 'object' || prop.type === 'array') && (
@@ -347,10 +572,12 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
                         isLast={idx === (prop.subProperties || []).length - 1}
                         t={t}
                         allLayers={allLayers}
-                        sharedTypes={sharedTypes} // Pass down types
+                        sharedTypes={sharedTypes}
                         isGhost={isGhost}
                         reviewMode={reviewMode}
                         depth={depth + 1}
+                        layerName={layerName}
+                        lang={lang}
                       />
                     );
                   })}

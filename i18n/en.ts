@@ -628,5 +628,24 @@ export const en = {
         managedDbDesc: "For your PostGIS tables. The provider handles security updates and backups 24/7, so your data is always available.",
         managedDbOptions: "Recommended: Google Cloud SQL (integrated with GIS), DigitalOcean Managed Database (simple pricing)."
       }
-    }
+    },
+    ai: {
+      generateDescription: 'Generate description',
+      suggestType: 'Suggest type',
+      inferConstraints: 'Suggest constraints',
+      generateAbstract: 'Generate abstract',
+      enterKey: 'Enter your AI API key',
+      saveKey: 'Save key',
+      keyStoredLocally: 'Stored in your browser only. Never sent to any server.',
+      keyRequired: 'AI key required — click to configure',
+      applyConstraints: 'Apply suggestions',
+      dismiss: 'Dismiss',
+      generating: 'Generating…',
+      error: 'AI error — click to retry',
+      errorInvalidKey: 'Invalid API key.',
+      suggestedConstraints: 'Suggested constraints',
+      provider: 'Provider',
+      suggestTheme: 'Suggest theme',
+      suggestKeywords: 'Suggest keywords',
+    },
   };
