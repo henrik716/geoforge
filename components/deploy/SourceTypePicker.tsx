@@ -27,7 +27,7 @@ const SOURCE_META: Record<SourceType, { icon: React.ReactNode; colorClass: strin
   }
 };
 
-const sourceTypes: SourceType[] = ['postgis', 'supabase', 'databricks', 'geopackage'];
+const sourceTypes: SourceType[] = ['postgis', 'supabase', 'geopackage'];
 
 const SourceTypePicker: React.FC<SourceTypePickerProps> = ({ sourceType, onSelect, t }) => {
   const d = t.deploy;
@@ -55,9 +55,9 @@ const SourceTypePicker: React.FC<SourceTypePickerProps> = ({ sourceType, onSelec
               <div className={`w-12 h-12 rounded-xl flex items-center justify-center border shrink-0 transition-transform group-hover:rotate-3 ${meta.colorClass}`}>
                 {meta.icon}
               </div>
-              <div>
-                <h3 className="text-[10px] font-black text-slate-800 uppercase tracking-widest mb-1">{d.sources[type] || type}</h3>
-                <p className="text-[10px] text-slate-500 font-medium leading-tight">{d.sources[`${type}Desc`] || `Connect to ${type}`}</p>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-[10px] font-black text-slate-800 uppercase tracking-widest mb-1 truncate">{d.sources[type] || type}</h3>
+                <p className="text-[10px] text-slate-500 font-medium leading-tight line-clamp-2">{d.sources[`${type}Desc`] || `Connect to ${type}`}</p>
               </div>
             </button>
           );
