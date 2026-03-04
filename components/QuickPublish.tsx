@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
-  ChevronLeft, ChevronDown, ChevronRight, Check, Database, Tag, Github, ArrowRight, Paintbrush
+  ChevronLeft, ChevronDown, ChevronRight, Check, Database, Tag, Github, ArrowRight, Paintbrush, GripVertical, RotateCcw
 } from 'lucide-react';
 import { DataModel, LayerStyle, ImportValidationResult } from '../types';
 import { InferredDataSummary } from '../utils/importUtils';
+import { useDragAndDropReorder } from '../hooks/useDragAndDropReorder';
+import { useRenderingOrder } from '../hooks/useRenderingOrder';
 import LayerStyleEditor from './LayerStyleEditor';
 import ImportWarnings from './ImportWarnings';
 import MetadataStep from './quickpublish/MetadataStep';
@@ -36,8 +38,26 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
     new Set(model.layers.map(l => l.id))
   );
   const [collapsedPreviews, setCollapsedPreviews] = useState<Set<string>>(
-    new Set(model.layers.slice(1).map(l => l.id)) // All but first layer collapsed
+    new Set((model.renderingOrder || model.layers.map(l => l.id)).slice(1).map(id => id)) // All but first layer in custom order collapsed
   );
+
+  // Use custom hooks for rendering order and drag-and-drop
+  const { layerOrder, resetOrder, handleReorder } = useRenderingOrder({ model, onUpdateModel: onUpdateModel });
+  
+  const {
+    draggedItem: draggedLayer,
+    dragOverItem: dragOverLayer,
+    handleDragStart,
+    handleDragOver,
+    handleDragEnter,
+    handleDragLeave,
+    handleDrop,
+    handleDragEnd
+  } = useDragAndDropReorder<string>({
+    items: layerOrder,
+    onReorder: handleReorder,
+    getItemId: (id) => id
+  });
 
   // Helper: toggle preview collapse state
   const togglePreviewCollapse = (layerId: string) => {
@@ -61,11 +81,27 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
       return next;
     });
   }, [selectedLayers, model.layers]);
-  const updateLayerStyle = (layerId: string, partial: Partial<LayerStyle>) => {
+
+  // Update collapsed state when layer order changes - first layer should be expanded
+  useEffect(() => {
+    const selectedLayerIds = layerOrder.filter(id => selectedLayers.has(id));
+    setCollapsedPreviews(prev => {
+      const next = new Set(prev);
+      // Clear all collapsed states first
+      next.clear();
+      // Add all layers except the first one to collapsed state
+      selectedLayerIds.slice(1).forEach(layerId => {
+        next.add(layerId);
+      });
+      return next;
+    });
+  }, [layerOrder, selectedLayers]);
+
+  const updateLayerStyle = (layerId: string) => (style: Partial<LayerStyle>) => {
     onUpdateModel({
       ...model,
       layers: model.layers.map(l =>
-        l.id === layerId ? { ...l, style: { ...l.style, ...partial } } : l
+        l.id === layerId ? { ...l, style: { ...l.style, ...style } } : l
       ),
     });
   };
@@ -135,45 +171,80 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
             />
           )}
 
-          <div className="space-y-3">
-            {summary.layers.map((layer, i) => {
-              const modelLayer = model.layers[i];
-              if (!modelLayer) return null;
-              const isSelected = selectedLayers.has(modelLayer.id);
-              return (
-                <button
-                  key={modelLayer.id}
-                  onClick={() => {
-                    const next = new Set(selectedLayers);
-                    if (isSelected && next.size > 1) next.delete(modelLayer.id);
-                    else next.add(modelLayer.id);
-                    setSelectedLayers(next);
-                  }}
-                  className={`w-full flex items-center gap-5 p-5 rounded-2xl border-2 text-left transition-all ${
-                    isSelected
-                      ? 'bg-white border-emerald-400 shadow-md shadow-emerald-50'
-                      : 'bg-slate-50 border-slate-200 opacity-60 hover:opacity-80'
-                  }`}
-                >
-                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg font-bold shrink-0 transition-colors ${
-                    isSelected ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'
-                  }`}>
-                    {GEOM_ICONS[layer.geometryType] || '◇'}
+          {/* Layer ordering section */}
+          <div className="bg-white rounded-2xl border-2 border-slate-200 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">{q.reorderingTitle}</h3>
+                <p className="text-sm text-slate-400 font-medium mt-1">{q.reorderingDesc}</p>
+              </div>
+              <button
+                onClick={resetOrder}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 text-slate-500 text-xs font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
+              >
+                <RotateCcw size={14} />
+                {q.resetOrder}
+              </button>
+            </div>
+            
+            <div className="space-y-2">
+              {layerOrder.map((layerId, index) => {
+                const modelLayer = model.layers.find(l => l.id === layerId);
+                const summaryLayer = summary.layers.find(l => modelLayer && model.layers.indexOf(modelLayer) === summary.layers.indexOf(l));
+                if (!modelLayer || !summaryLayer) return null;
+                
+                const isSelected = selectedLayers.has(modelLayer.id);
+                const isDragged = draggedLayer === layerId;
+                const isDragOver = dragOverLayer === layerId;
+                
+                return (
+                  <div
+                    key={layerId}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, layerId)}
+                    onDragOver={handleDragOver}
+                    onDragEnter={(e) => handleDragEnter(e, layerId)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, layerId)}
+                    onDragEnd={handleDragEnd}
+                    className={`flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all cursor-move ${
+                      isDragged ? 'opacity-50 scale-95' : ''
+                    } ${isDragOver ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-slate-50'} ${
+                      isSelected ? 'ring-2 ring-emerald-400' : ''
+                    } hover:border-slate-300 hover:bg-white`}
+                  >
+                    <div className="flex items-center gap-3 flex-1">
+                      <GripVertical size={16} className="text-slate-400" />
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 transition-colors ${
+                        isSelected ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'
+                      }`}>
+                        {GEOM_ICONS[summaryLayer.geometryType] || '◇'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-black text-slate-900 truncate">{summaryLayer.tableName}</p>
+                        <p className="text-[9px] text-slate-400 font-medium">
+                          {summaryLayer.geometryType} · {summaryLayer.featureCount.toLocaleString()} {q.features}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const next = new Set(selectedLayers);
+                        if (isSelected && next.size > 1) next.delete(modelLayer.id);
+                        else next.add(modelLayer.id);
+                        setSelectedLayers(next);
+                      }}
+                      className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all shrink-0 ${
+                        isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'
+                      }`}
+                    >
+                      {isSelected && <Check size={12} strokeWidth={3} className="text-white" />}
+                    </button>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-black text-slate-900 truncate">{layer.tableName}</p>
-                    <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                      {layer.geometryType} · {layer.featureCount.toLocaleString()} {q.features} · {layer.columnCount} {q.columns} · EPSG:{layer.srid}
-                    </p>
-                  </div>
-                  <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${
-                    isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'
-                  }`}>
-                    {isSelected && <Check size={14} strokeWidth={3} className="text-white" />}
-                  </div>
-                </button>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
 
           <div className="flex items-center justify-between pt-4">
@@ -189,27 +260,67 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
       {step === 1 && (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400">
           <div className="space-y-2">
-            <h2 className="text-2xl font-black tracking-tight text-slate-900">{q.stepStyleTitle || st.title}</h2>
-            <p className="text-sm text-slate-400 font-medium">{q.stepStyleDesc}</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-black tracking-tight text-slate-900">{q.stepStyleTitle || st.title}</h2>
+                <p className="text-sm text-slate-400 font-medium">{q.stepStyleDesc}</p>
+                <div className="flex items-center gap-2 text-xs text-indigo-600 font-medium">
+                  <GripVertical size={14} />
+                  <span>Drag layers to reorder rendering order</span>
+                </div>
+              </div>
+              <button 
+                onClick={resetOrder} 
+                className="text-xs font-black text-slate-500 hover:text-slate-700 flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-lg border border-slate-200 hover:border-slate-300 transition-all"
+              >
+                <RotateCcw size={12} />
+                {q.resetOrder || 'Reset Order'}
+              </button>
+            </div>
           </div>
 
-          <div className="space-y-6">
-            {model.layers.filter(l => selectedLayers.has(l.id)).map((layer, index) => {
-              const isCollapsed = collapsedPreviews.has(layer.id);
-              return (
+          <div className="space-y-6"
+             onDragOver={handleDragOver}
+             onDrop={(e) => {
+               e.preventDefault();
+               e.stopPropagation();
+               // Custom hook handles state cleanup automatically
+             }}
+          >
+            {layerOrder
+              .filter(layerId => selectedLayers.has(layerId))
+              .map(layerId => {
+                const layer = model.layers.find(l => l.id === layerId);
+                if (!layer) return null;
+                const isCollapsed = collapsedPreviews.has(layer.id);
+                return (
                 <div key={layer.id} className={`bg-white rounded-2xl border-2 transition-all duration-200 overflow-hidden relative ${isCollapsed ? 'border-slate-200' : 'border-indigo-200 shadow-md shadow-indigo-50'}`}>
-                  {/* Collapsible header */}
+                  {/* Collapsible header with drag functionality */}
                   <div
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, layer.id)}
+                    onDragOver={handleDragOver}
+                    onDragEnter={(e) => handleDragEnter(e, layer.id)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, layer.id)}
+                    onDragEnd={handleDragEnd}
                     onClick={() => {
                       console.log('Clicked layer:', layer.name, 'collapsed:', isCollapsed);
                       togglePreviewCollapse(layer.id);
                     }}
-                    className={`flex items-center gap-3 p-5 transition-all duration-200 cursor-pointer relative z-10 ${isCollapsed ? 'hover:bg-slate-50' : 'hover:bg-indigo-50'}`}
+                    className={`flex items-center gap-3 p-5 transition-all duration-200 cursor-pointer relative z-10 ${
+                      draggedLayer === layer.id ? 'opacity-50 scale-95' : ''
+                    } ${dragOverLayer === layer.id ? 'border-indigo-400 bg-indigo-50' : ''} ${
+                      isCollapsed ? 'hover:bg-slate-50' : 'hover:bg-indigo-50'
+                    }`}
                   >
-                    <div className="flex-1 flex items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <GripVertical size={16} className="text-slate-400 cursor-move" />
                       <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold transition-colors ${isCollapsed ? 'bg-slate-100 text-slate-500' : 'bg-indigo-100 text-indigo-600'}`}>
                         {GEOM_ICONS[layer.geometryType] || '◇'}
                       </div>
+                    </div>
+                    <div className="flex-1 flex items-center gap-3">
                       <div className="text-left">
                         <p className={`text-sm font-black transition-colors ${isCollapsed ? 'text-slate-900' : 'text-indigo-900'}`}>{layer.name}</p>
                         <p className="text-[10px] text-slate-400 font-medium">{layer.geometryType}</p>
@@ -225,7 +336,7 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
                     <div className={`p-5 pt-0 space-y-4 ${isCollapsed ? 'border-t-0' : 'border-t border-slate-100'}`}>
                       <LayerStyleEditor
                         layer={layer}
-                        onUpdate={(partial) => updateLayerStyle(layer.id, partial)}
+                        onUpdate={updateLayerStyle(layer.id)}
                         t={t}
                         variant="light"
                         showPreview={true}
@@ -283,6 +394,7 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
           dataBlob={dataBlob}
           lang={lang}
           t={t}
+          onBack={() => setStep(2)}
         />
       )}
     </div>

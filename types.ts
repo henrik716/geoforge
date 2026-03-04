@@ -115,6 +115,7 @@ export interface DataModel {
   githubMeta?: { repo: string; path: string; branch: string; };
   sourceConnection?: SourceConnection;
   sharedTypes?: SharedType[];
+  renderingOrder?: string[]; // Layer IDs in desired rendering order
 }
 
 export interface SharedType {

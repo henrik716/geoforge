@@ -15,9 +15,10 @@ interface PublishStepProps {
   dataBlob?: { blob: Blob; filename: string } | null;
   lang: string;
   t: any;
+  onBack?: () => void;
 }
 
-const PublishStep: React.FC<PublishStepProps> = ({ model, summary, selectedLayers, dataBlob, lang, t }) => {
+const PublishStep: React.FC<PublishStepProps> = ({ model, summary, selectedLayers, dataBlob, lang, t, onBack }) => {
   const q = t.quickPublish || {};
   const d = t.deploy || {};
 
@@ -317,7 +318,11 @@ const PublishStep: React.FC<PublishStepProps> = ({ model, summary, selectedLayer
 
       {/* Actions */}
       <div className="flex items-center justify-between pt-4">
-        <div />
+        {onBack && (
+          <button onClick={onBack} className="px-6 py-3 rounded-2xl border-2 border-slate-200 text-slate-500 font-black text-xs uppercase tracking-widest hover:bg-slate-50 active:scale-95 transition-all">
+            {q.back}
+          </button>
+        )}
         <div className="flex items-center gap-3">
           <button onClick={handleDownloadZip} className="px-4 py-3 rounded-2xl border-2 border-slate-200 text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-slate-600 active:scale-95 transition-all flex items-center gap-2">
             <Download size={14} /> {d.downloadZip}
