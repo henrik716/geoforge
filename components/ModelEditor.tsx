@@ -454,7 +454,7 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
                   </div>
                   <div>
                     <h4 className="text-xs font-black text-slate-700">{t.quickPublish?.renderingOrder || 'Rendering Order'}</h4>
-                    <span className="text-[9px] text-slate-400 font-medium">{t.quickPublish?.dragToReorder || 'Drag to reorder'}</span>
+                    <span className="text-[9px] text-slate-400 font-medium">{t.quickPublish?.dragToReorderLayers || 'Drag layers to reorder rendering order'}</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

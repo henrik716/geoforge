@@ -171,20 +171,11 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
             />
           )}
 
-          {/* Layer ordering section */}
+          {/* Layer selection section */}
           <div className="bg-white rounded-2xl border-2 border-slate-200 p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">{q.reorderingTitle}</h3>
-                <p className="text-sm text-slate-400 font-medium mt-1">{q.reorderingDesc}</p>
-              </div>
-              <button
-                onClick={resetOrder}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 text-slate-500 text-xs font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
-              >
-                <RotateCcw size={14} />
-                {q.resetOrder}
-              </button>
+            <div className="space-y-2">
+              <h3 className="text-lg font-black text-slate-900">Select Layers to Include</h3>
+              <p className="text-sm text-slate-400 font-medium">Choose which layers you want to include in your published model</p>
             </div>
             
             <div className="space-y-2">
@@ -194,27 +185,24 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
                 if (!modelLayer || !summaryLayer) return null;
                 
                 const isSelected = selectedLayers.has(modelLayer.id);
-                const isDragged = draggedLayer === layerId;
-                const isDragOver = dragOverLayer === layerId;
                 
                 return (
                   <div
                     key={layerId}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, layerId)}
-                    onDragOver={handleDragOver}
-                    onDragEnter={(e) => handleDragEnter(e, layerId)}
-                    onDragLeave={handleDragLeave}
-                    onDrop={(e) => handleDrop(e, layerId)}
-                    onDragEnd={handleDragEnd}
-                    className={`flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all cursor-move ${
-                      isDragged ? 'opacity-50 scale-95' : ''
-                    } ${isDragOver ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-slate-50'} ${
-                      isSelected ? 'ring-2 ring-emerald-400' : ''
+                    className={`flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                      isSelected ? 'ring-2 ring-emerald-400 border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'
                     } hover:border-slate-300 hover:bg-white`}
+                    onClick={() => {
+                      const next = new Set(selectedLayers);
+                      if (next.has(modelLayer.id)) {
+                        next.delete(modelLayer.id);
+                      } else {
+                        next.add(modelLayer.id);
+                      }
+                      setSelectedLayers(next);
+                    }}
                   >
                     <div className="flex items-center gap-3 flex-1">
-                      <GripVertical size={16} className="text-slate-400" />
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 transition-colors ${
                         isSelected ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'
                       }`}>
@@ -266,7 +254,7 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
                 <p className="text-sm text-slate-400 font-medium">{q.stepStyleDesc}</p>
                 <div className="flex items-center gap-2 text-xs text-indigo-600 font-medium">
                   <GripVertical size={14} />
-                  <span>Drag layers to reorder rendering order</span>
+                  <span>{q.dragToReorderLayers || 'Drag layers to reorder rendering order'}</span>
                 </div>
               </div>
               <button 
