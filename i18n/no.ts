@@ -44,6 +44,7 @@ export const no = {
       skipToPublish: "Hopp til publisering",
       editModel: "Vis full modell",
       selectedLayers: "tabeller valgt",
+      clickToConfigure: "Klikk for å konfigurere symbologi",
     },
     importGis: "Importer GIS-fil", importGisHint: "Velg en GeoJSON-, GML- eller GPKG-fil",
     importUrl: "Hent fra API (URL)", importUrlHint: "Lim inn en lenke til et GeoJSON REST-API",

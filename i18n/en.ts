@@ -44,6 +44,7 @@ export const en = {
       skipToPublish: "Skip to publish",
       editModel: "View full model",
       selectedLayers: "tables selected",
+      clickToConfigure: "Click to configure symbology",
     },
     importGis: "Import GIS file", importGisHint: "Select a GeoJSON, GML or GPKG file",
     importUrl: "Fetch from API (URL)", importUrlHint: "Paste a link to a GeoJSON REST API",

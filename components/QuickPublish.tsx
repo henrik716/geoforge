@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  ChevronLeft, Check, Database, Tag, Github, ArrowRight, Paintbrush
+  ChevronLeft, ChevronDown, ChevronRight, Check, Database, Tag, Github, ArrowRight, Paintbrush
 } from 'lucide-react';
 import { DataModel, LayerStyle, ImportValidationResult } from '../types';
 import { InferredDataSummary } from '../utils/importUtils';
@@ -35,8 +35,32 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
   const [selectedLayers, setSelectedLayers] = useState<Set<string>>(
     new Set(model.layers.map(l => l.id))
   );
+  const [collapsedPreviews, setCollapsedPreviews] = useState<Set<string>>(
+    new Set(model.layers.slice(1).map(l => l.id)) // All but first layer collapsed
+  );
 
-  // Helper: update a single layer's style
+  // Helper: toggle preview collapse state
+  const togglePreviewCollapse = (layerId: string) => {
+    const next = new Set(collapsedPreviews);
+    if (next.has(layerId)) next.delete(layerId);
+    else next.add(layerId);
+    setCollapsedPreviews(next);
+  };
+
+  // Update collapse state when selected layers change
+  useEffect(() => {
+    const selectedLayerIds = model.layers.filter(l => selectedLayers.has(l.id)).map(l => l.id);
+    setCollapsedPreviews(prev => {
+      const next = new Set(prev);
+      // Remove collapsed state for layers that are no longer selected
+      prev.forEach(layerId => {
+        if (!selectedLayerIds.includes(layerId)) {
+          next.delete(layerId);
+        }
+      });
+      return next;
+    });
+  }, [selectedLayers, model.layers]);
   const updateLayerStyle = (layerId: string, partial: Partial<LayerStyle>) => {
     onUpdateModel({
       ...model,
@@ -170,26 +194,56 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
           </div>
 
           <div className="space-y-6">
-            {model.layers.filter(l => selectedLayers.has(l.id)).map((layer) => (
-              <div key={layer.id} className="bg-white rounded-2xl border-2 border-slate-200 p-5 space-y-4">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold bg-slate-100 text-slate-500`}>
-                    {GEOM_ICONS[layer.geometryType] || '◇'}
+            {model.layers.filter(l => selectedLayers.has(l.id)).map((layer, index) => {
+              const isCollapsed = collapsedPreviews.has(layer.id);
+              return (
+                <div key={layer.id} className={`bg-white rounded-2xl border-2 transition-all duration-200 overflow-hidden relative ${isCollapsed ? 'border-slate-200' : 'border-indigo-200 shadow-md shadow-indigo-50'}`}>
+                  {/* Collapsible header */}
+                  <div
+                    onClick={() => {
+                      console.log('Clicked layer:', layer.name, 'collapsed:', isCollapsed);
+                      togglePreviewCollapse(layer.id);
+                    }}
+                    className={`flex items-center gap-3 p-5 transition-all duration-200 cursor-pointer relative z-10 ${isCollapsed ? 'hover:bg-slate-50' : 'hover:bg-indigo-50'}`}
+                  >
+                    <div className="flex-1 flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold transition-colors ${isCollapsed ? 'bg-slate-100 text-slate-500' : 'bg-indigo-100 text-indigo-600'}`}>
+                        {GEOM_ICONS[layer.geometryType] || '◇'}
+                      </div>
+                      <div className="text-left">
+                        <p className={`text-sm font-black transition-colors ${isCollapsed ? 'text-slate-900' : 'text-indigo-900'}`}>{layer.name}</p>
+                        <p className="text-[10px] text-slate-400 font-medium">{layer.geometryType}</p>
+                      </div>
+                    </div>
+                    <div className={`transition-transform duration-200 ${isCollapsed ? 'rotate-0' : 'rotate-180'}`}>
+                      <ChevronDown size={20} className={`transition-colors ${isCollapsed ? 'text-slate-400' : 'text-indigo-500'}`} />
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-black text-slate-900">{layer.name}</p>
-                    <p className="text-[10px] text-slate-400 font-medium">{layer.geometryType}</p>
+                  
+                  {/* Collapsible content */}
+                  <div className={`transition-all duration-300 ease-in-out ${isCollapsed ? 'max-h-0 opacity-0' : 'max-h-screen opacity-100'}`}>
+                    <div className={`p-5 pt-0 space-y-4 ${isCollapsed ? 'border-t-0' : 'border-t border-slate-100'}`}>
+                      <LayerStyleEditor
+                        layer={layer}
+                        onUpdate={(partial) => updateLayerStyle(layer.id, partial)}
+                        t={t}
+                        variant="light"
+                        showPreview={true}
+                      />
+                    </div>
                   </div>
+                  
+                  {/* Collapsed state indicator */}
+                  {isCollapsed && (
+                    <div className="px-5 pb-3 pointer-events-none">
+                      <div className="text-xs text-slate-400 font-medium italic">
+                        {q.clickToConfigure}
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <LayerStyleEditor
-                  layer={layer}
-                  onUpdate={(partial) => updateLayerStyle(layer.id, partial)}
-                  t={t}
-                  variant="light"
-                  showPreview={true}
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Navigation */}
@@ -197,7 +251,10 @@ const QuickPublish: React.FC<QuickPublishProps> = ({
             <button onClick={() => setStep(0)} className="px-6 py-3 rounded-2xl border-2 border-slate-200 text-slate-500 font-black text-xs uppercase tracking-widest hover:bg-slate-50 active:scale-95 transition-all">
               {q.back}
             </button>
-            <button onClick={() => setStep(2)} className="px-8 py-3.5 rounded-2xl bg-slate-900 text-white font-black text-xs uppercase tracking-[0.15em] hover:bg-slate-800 active:scale-95 transition-all shadow-lg flex items-center gap-2">
+            <button onClick={() => {
+              console.log('Next button clicked, going to step 2');
+              setStep(2);
+            }} className="px-8 py-3.5 rounded-2xl bg-slate-900 text-white font-black text-xs uppercase tracking-[0.15em] hover:bg-slate-800 active:scale-95 transition-all shadow-lg flex items-center gap-2">
               {q.next} <ArrowRight size={16} />
             </button>
           </div>
