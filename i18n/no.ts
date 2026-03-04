@@ -662,7 +662,7 @@ export const no = {
       aiProvider: 'AI-leverandør',
       apiKey: 'API-nøkkel',
       getKey: 'Hent nøkkel',
-      keyConfigured: 'Nøkkel konfigurert ✓',
+      keyConfigured: 'Nøkkel konfigurert',
       clear: 'Fjern',
       cancel: 'Avbryt',
       saved: 'Lagret!',

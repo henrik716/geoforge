@@ -662,7 +662,7 @@ export const en = {
       aiProvider: 'AI Provider',
       apiKey: 'API Key',
       getKey: 'Get Key',
-      keyConfigured: 'Key configured ✓',
+      keyConfigured: 'Key configured',
       clear: 'Clear',
       cancel: 'Cancel',
       saved: 'Saved!',
