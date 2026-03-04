@@ -48,6 +48,7 @@ export const en = {
       reorderingTitle: "Rendering Order",
       reorderingDesc: "Drag layers to change their display order in the map. Top layers will appear above bottom layers.",
       dragToReorder: "Drag to reorder",
+      dragToReorderLayers: "Drag layers to reorder rendering order",
       resetOrder: "Reset to original order",
       layerOrder: "Layer order",
       renderingOrder: "Rendering order",

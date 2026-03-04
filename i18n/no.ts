@@ -48,6 +48,7 @@ export const no = {
       reorderingTitle: "Tegnerekkefølge",
       reorderingDesc: "Dra lag for å endre visningsrekkefølgen i kartet. Øverste lag vil vises over nederste lag.",
       dragToReorder: "Dra for å endre rekkefølge",
+      dragToReorderLayers: "Dra lag for å endre tegnerekkefølge",
       resetOrder: "Tilbakestill til opprinnelig rekkefølge",
       layerOrder: "Lagrekkefølge",
       renderingOrder: "Tegnerekkefølge",
