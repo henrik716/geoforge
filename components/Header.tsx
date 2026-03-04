@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { HelpCircle, Hammer, Sparkles, X } from 'lucide-react';
 import { Language } from '../types';
-import { AiProvider, getProvider, setProvider, getApiKey, saveApiKey } from '../utils/aiService';
+import { AiProvider, getProvider, setProvider, getApiKey, saveApiKey, clearApiKey } from '../utils/aiService';
 
 const Header: React.FC<{
   t: any;
@@ -30,6 +30,16 @@ const Header: React.FC<{
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showAiPanel]);
 
+  // Listen for custom AI key change events
+  useEffect(() => {
+    const handleAiKeyChange = (e: CustomEvent) => {
+      setHasKey(e.detail.hasKey);
+    };
+    
+    window.addEventListener('ai-key-changed', handleAiKeyChange as EventListener);
+    return () => window.removeEventListener('ai-key-changed', handleAiKeyChange as EventListener);
+  }, []);
+
   const handleSave = () => {
     if (!keyDraft.trim()) return;
     saveApiKey(keyDraft, providerDraft);
@@ -40,7 +50,7 @@ const Header: React.FC<{
   };
 
   const handleClear = () => {
-    localStorage.removeItem(`geoforge-ai-key-${getProvider()}`);
+    clearApiKey();
     setHasKey(false);
     setKeyDraft('');
   };

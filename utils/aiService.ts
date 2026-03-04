@@ -45,6 +45,18 @@ export function getApiKey(p?: AiProvider): string | null {
 
 export function saveApiKey(key: string, p?: AiProvider): void {
   localStorage.setItem(API_KEY_PREFIX + (p ?? getProvider()), key.trim());
+  // Dispatch custom event to notify components about the API key change
+  window.dispatchEvent(new CustomEvent('ai-key-changed', { 
+    detail: { provider: p ?? getProvider(), hasKey: true } 
+  }));
+}
+
+export function clearApiKey(p?: AiProvider): void {
+  localStorage.removeItem(API_KEY_PREFIX + (p ?? getProvider()));
+  // Dispatch custom event to notify components about the API key change
+  window.dispatchEvent(new CustomEvent('ai-key-changed', { 
+    detail: { provider: p ?? getProvider(), hasKey: false } 
+  }));
 }
 
 async function callAI(system: string, user: string): Promise<string> {
