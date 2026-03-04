@@ -10,9 +10,11 @@ import ConstraintsEditor from './property/ConstraintsEditor';
 import CodelistEditor from './property/CodelistEditor';
 import {
   AiProvider, AiConstraintSuggestion,
-  getProvider, setProvider, getApiKey, saveApiKey, AiAuthError,
   generatePropertyDescription, suggestFieldType, inferConstraints,
 } from '../utils/aiService';
+import { useAiContext } from '../hooks/useAiContext';
+import AiLoadingSkeleton from './ai/AiLoadingSkeleton';
+import AiErrorHandler from './ai/AiErrorHandler';
 
 interface PropertyEditorProps {
   prop: ModelProperty;
@@ -84,94 +86,57 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
   const [isOpen, setIsOpen] = useState(prop.name === "" || depth > 0);
   const config = TYPE_CONFIG[prop.type] || TYPE_CONFIG.string;
   const nameInputRef = useRef<HTMLInputElement>(null);
-
-  // AI state
-  const [aiLoading, setAiLoading] = useState<AiFeature | null>(null);
-  const [aiError, setAiError] = useState<AiFeature | null>(null);
   const [constraintSuggestion, setConstraintSuggestion] = useState<AiConstraintSuggestion | null>(null);
-  const [showKeyInput, setShowKeyInput] = useState(false);
-  const [keyDraft, setKeyDraft] = useState('');
-  const [providerDraft, setProviderDraft] = useState<AiProvider>(getProvider());
-  const [pendingAction, setPendingAction] = useState<{ feature: AiFeature; fn: () => Promise<void> } | null>(null);
+  
+  const aiContext = useAiContext();
 
-  const runAi = async (feature: AiFeature, action: () => Promise<void>) => {
-    if (!getApiKey()) {
-      setPendingAction({ feature, fn: action });
-      setProviderDraft(getProvider());
-      setShowKeyInput(true);
-      return;
-    }
-    setAiLoading(feature);
-    setAiError(null);
-    try {
-      await action();
-    } catch (e) {
-      if (e instanceof AiAuthError) {
-        setPendingAction({ feature, fn: action });
-        setProviderDraft(getProvider());
-        setKeyDraft('');
-        setShowKeyInput(true);
-      } else {
-        setAiError(feature);
-      }
-    } finally {
-      setAiLoading(null);
-    }
-  };
-
-  const handleSaveKey = async () => {
-    if (!keyDraft.trim()) return;
-    saveApiKey(keyDraft, providerDraft);
-    setProvider(providerDraft);
-    setShowKeyInput(false);
-    setKeyDraft('');
-    if (pendingAction) {
-      const { feature, fn } = pendingAction;
-      setPendingAction(null);
-      setAiLoading(feature);
-      setAiError(null);
-      try {
-        await fn();
-      } catch {
-        setAiError(feature);
-      } finally {
-        setAiLoading(null);
-      }
-    }
-  };
-
-  const handleGenerateDescription = () => runAi('desc', async () => {
-    const result = await generatePropertyDescription({
+  const handleGenerateDescription = () => {
+    aiContext.setLoading('description', `Generating description for "${prop.name}"…`);
+    generatePropertyDescription({
       fieldName: prop.name || 'field',
       fieldType: prop.type,
       layerName,
       lang,
+    }).then(result => {
+      handleUpdate({ description: result });
+      aiContext.setSuccess();
+    }).catch(error => {
+      aiContext.setError(error, 'description');
     });
-    handleUpdate({ description: result });
-  });
+  };
 
-  const handleSuggestType = () => runAi('type', async () => {
-    const result = await suggestFieldType({
+  const handleSuggestType = () => {
+    aiContext.setLoading('type', `Analyzing "${prop.name}" to suggest type…`);
+    suggestFieldType({
       fieldName: prop.name || 'field',
       description: prop.description || '',
       lang,
+    }).then(result => {
+      const validTypes: PropertyType[] = ['string', 'number', 'integer', 'boolean', 'date', 'geometry', 'codelist', 'json', 'object', 'array'];
+      const cleaned = result.trim().toLowerCase() as PropertyType;
+      if (validTypes.includes(cleaned)) {
+        handleUpdate({ type: cleaned, defaultValue: '', constraints: {} });
+      }
+      aiContext.setSuccess();
+    }).catch(error => {
+      aiContext.setError(error, 'type');
     });
-    const validTypes: PropertyType[] = ['string', 'number', 'integer', 'boolean', 'date', 'geometry', 'codelist', 'json', 'object', 'array'];
-    const cleaned = result.trim().toLowerCase() as PropertyType;
-    if (validTypes.includes(cleaned)) {
-      handleUpdate({ type: cleaned, defaultValue: '', constraints: {} });
-    }
-  });
+  };
 
-  const handleInferConstraints = () => runAi('constraints', async () => {
-    const result = await inferConstraints({
+  const handleInferConstraints = () => {
+    aiContext.setLoading('constraints', `Inferring constraints for "${prop.name}"…`);
+    inferConstraints({
       fieldName: prop.name || 'field',
       fieldType: prop.type,
       description: prop.description || '',
       lang,
+    }).then(result => {
+      setConstraintSuggestion(result);
+      aiContext.setSuccess();
+    }).catch(error => {
+      aiContext.setError(error, 'constraints');
     });
-    setConstraintSuggestion(result);
-  });
+  };
 
   const handleApplyConstraints = () => {
     if (!constraintSuggestion) return;
@@ -341,21 +306,20 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
                 <div className="relative flex-1">
                   <select value={prop.type} onChange={e => handleUpdate({ type: e.target.value as PropertyType, defaultValue: '', constraints: {} })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all appearance-none cursor-pointer h-12">
                     {Object.entries(t.types).filter(([k]) => k !== 'geometry').map(([k, v]) => (
-                        <option key={k} value={k}>{v as string}</option>
+                      <option key={k} value={k}>{v as string}</option>
                     ))}
                   </select>
                   <ChevronDown size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 </div>
                 <AiButton
                   onClick={handleSuggestType}
-                  isLoading={aiLoading === 'type'}
-                  hasError={aiError === 'type'}
+                  isLoading={aiContext.isLoading && aiContext.currentOperation === 'type'}
+                  hasError={aiContext.error !== null}
                   tooltip={t.ai?.suggestType || 'Suggest type'}
                 />
               </div>
             </PropDiffField>
 
-            {/* --- SHARED TYPE SELECTOR --- */}
             {prop.type === 'shared_type' && (
               <PropDiffField label="Velg Datatype" currentValue={prop.sharedTypeId} baselineValue={baselineProp?.sharedTypeId} reviewMode={!!reviewMode}>
                 <div className="relative">
@@ -373,7 +337,6 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
                 </div>
               </PropDiffField>
             )}
-
           </div>
 
           {prop.type !== 'object' && prop.type !== 'array' && prop.type !== 'shared_type' && (
@@ -386,8 +349,8 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
             <div className="flex items-center justify-end">
               <AiButton
                 onClick={handleInferConstraints}
-                isLoading={aiLoading === 'constraints'}
-                hasError={aiError === 'constraints'}
+                isLoading={aiContext.isLoading && aiContext.currentOperation === 'constraints'}
+                hasError={aiContext.error !== null}
                 tooltip={t.ai?.inferConstraints || 'Suggest constraints'}
               />
             </div>
@@ -499,50 +462,13 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
               <textarea placeholder={t.propDescriptionPlaceholder} value={prop.description} onChange={e => handleUpdate({ description: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 pr-10 text-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all min-h-[100px] resize-none leading-relaxed" />
               <AiButton
                 onClick={handleGenerateDescription}
-                isLoading={aiLoading === 'desc'}
-                hasError={aiError === 'desc'}
+                isLoading={aiContext.isLoading && aiContext.currentOperation === 'description'}
+                hasError={aiContext.error !== null}
                 tooltip={t.ai?.generateDescription || 'Generate description'}
                 className="absolute top-2 right-2"
               />
             </div>
           </PropDiffField>
-
-          {showKeyInput && (
-            <div className="fixed inset-0 z-[999] flex items-center justify-center p-4" onClick={() => setShowKeyInput(false)}>
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 w-80 animate-in zoom-in-95 duration-150" onClick={e => e.stopPropagation()}>
-                <p className="text-xs font-black text-slate-700 mb-4">{t.ai?.enterKey || 'Enter your AI API key'}</p>
-                <div className="flex gap-2 mb-4">
-                  {(['claude', 'gemini'] as AiProvider[]).map(p => (
-                    <button
-                      key={p}
-                      onClick={() => { setProviderDraft(p); setKeyDraft(''); }}
-                      className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${providerDraft === p ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                    >
-                      {p === 'claude' ? 'Claude' : 'Gemini'}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="password"
-                  placeholder={providerDraft === 'claude' ? 'sk-ant-api03-…' : 'AIza…'}
-                  value={keyDraft}
-                  onChange={e => setKeyDraft(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-indigo-500 mb-3"
-                  autoFocus
-                />
-                <div className="flex items-center gap-2">
-                  <button onClick={handleSaveKey} className="flex-1 bg-indigo-600 text-white text-[10px] font-black py-3 rounded-xl hover:bg-indigo-700 transition-colors">
-                    {t.ai?.saveKey || 'Save key'}
-                  </button>
-                  <button onClick={() => setShowKeyInput(false)} className="px-4 py-3 text-slate-400 text-[10px] font-black hover:text-slate-600">
-                    {t.cancel || 'Cancel'}
-                  </button>
-                </div>
-                <p className="text-[9px] text-slate-400 mt-3 leading-relaxed">{t.ai?.keyStoredLocally || 'Stored in your browser only.'}</p>
-              </div>
-            </div>
-          )}
 
           {/* --- NESTED SUB-PROPERTIES (OBJECT/ARRAY) --- */}
           {(prop.type === 'object' || prop.type === 'array') && (

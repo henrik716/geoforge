@@ -1,7 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { HelpCircle, Hammer, Sparkles, X } from 'lucide-react';
+import { HelpCircle, Hammer, Sparkles, X, Activity, Check, AlertTriangle } from 'lucide-react';
 import { Language } from '../types';
 import { AiProvider, getProvider, setProvider, getApiKey, saveApiKey, clearApiKey } from '../utils/aiService';
+import { useAiStatus } from '../hooks/useAiStatus';
+import AiConfigModal from './ai/AiConfigModal';
+import AiErrorHandler from './ai/AiErrorHandler';
 
 const Header: React.FC<{
   t: any;
@@ -11,16 +14,14 @@ const Header: React.FC<{
   onHome?: () => void;
 }> = ({ t, lang, onLangChange, onShowGuide, onHome }) => {
   const [showAiPanel, setShowAiPanel] = useState(false);
-  const [providerDraft, setProviderDraft] = useState<AiProvider>(getProvider());
-  const [keyDraft, setKeyDraft] = useState('');
-  const [hasKey, setHasKey] = useState(() => !!getApiKey());
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [pendingOperation, setPendingOperation] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  
+  const aiStatus = useAiStatus();
 
   useEffect(() => {
     if (!showAiPanel) return;
-    setProviderDraft(getProvider());
-    setKeyDraft('');
-    setHasKey(!!getApiKey());
     const handleClickOutside = (e: MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
         setShowAiPanel(false);
@@ -30,29 +31,37 @@ const Header: React.FC<{
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showAiPanel]);
 
-  // Listen for custom AI key change events
+  // Listen for AI configuration requests
   useEffect(() => {
-    const handleAiKeyChange = (e: CustomEvent) => {
-      setHasKey(e.detail.hasKey);
+    const handleAiConfigureRequired = (e: CustomEvent) => {
+      setPendingOperation(e.detail.operation);
+      setShowAiModal(true);
     };
-    
-    window.addEventListener('ai-key-changed', handleAiKeyChange as EventListener);
-    return () => window.removeEventListener('ai-key-changed', handleAiKeyChange as EventListener);
+
+    window.addEventListener('ai-configure-required', handleAiConfigureRequired as EventListener);
+    return () => window.removeEventListener('ai-configure-required', handleAiConfigureRequired as EventListener);
   }, []);
 
-  const handleSave = () => {
-    if (!keyDraft.trim()) return;
-    saveApiKey(keyDraft, providerDraft);
-    setProvider(providerDraft);
-    setHasKey(true);
-    setKeyDraft('');
-    setShowAiPanel(false);
+  const handleAiButtonClick = () => {
+    if (!aiStatus.hasKey) {
+      setShowAiModal(true);
+    } else {
+      setShowAiPanel(!showAiPanel);
+    }
   };
 
-  const handleClear = () => {
-    clearApiKey();
-    setHasKey(false);
-    setKeyDraft('');
+  const getAiStatusColor = () => {
+    if (aiStatus.error) return 'text-rose-500 hover:bg-rose-50';
+    if (aiStatus.isActive) return 'text-indigo-600 hover:bg-indigo-50';
+    if (aiStatus.hasKey) return 'text-indigo-500 hover:bg-indigo-50';
+    return 'text-slate-300 hover:text-slate-500 hover:bg-slate-50';
+  };
+
+  const getAiStatusIcon = () => {
+    if (aiStatus.error) return <AlertTriangle size={18} />;
+    if (aiStatus.isActive) return <Activity size={18} className="animate-pulse" />;
+    if (aiStatus.hasKey) return <Sparkles size={18} />;
+    return <Sparkles size={18} />;
   };
 
   return (
@@ -74,65 +83,101 @@ const Header: React.FC<{
         {/* AI settings button */}
         <div className="relative" ref={panelRef}>
           <button
-            onClick={() => setShowAiPanel(v => !v)}
-            title={t.ai?.keyConfigured || 'AI settings'}
-            className={`p-2 md:p-3 rounded-xl transition-all flex items-center gap-1.5 ${hasKey ? 'text-indigo-500 hover:bg-indigo-50' : 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'}`}
+            onClick={handleAiButtonClick}
+            title={aiStatus.hasKey ? `AI: ${aiStatus.provider}` : 'AI settings - click to configure'}
+            className={`p-2 md:p-3 rounded-xl transition-all flex items-center gap-1.5 ${getAiStatusColor()}`}
           >
-            <Sparkles size={18} className="md:w-[20px] md:h-[20px]" />
-            {hasKey && <span className="hidden md:block text-[9px] font-black uppercase tracking-widest">{getProvider()}</span>}
+            {getAiStatusIcon()}
+            {aiStatus.hasKey && (
+              <span className="hidden md:block text-[9px] font-black uppercase tracking-widest">
+                {aiStatus.provider}
+              </span>
+            )}
+            {aiStatus.isActive && (
+              <div className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-600 rounded-full animate-pulse" />
+            )}
           </button>
 
           {showAiPanel && (
-            <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 z-[300] animate-in zoom-in-95 slide-in-from-top-1 duration-150">
+            <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 z-[300] animate-in zoom-in-95 slide-in-from-top-1 duration-150">
               <div className="flex items-center justify-between mb-4">
-                <p className="text-xs font-black text-slate-700">{t.ai?.enterKey || 'AI API key'}</p>
-                <button onClick={() => setShowAiPanel(false)} className="text-slate-300 hover:text-slate-500 transition-colors"><X size={14} /></button>
-              </div>
-
-              {/* Provider toggle */}
-              <div className="flex gap-2 mb-4">
-                {(['claude', 'gemini'] as AiProvider[]).map(p => (
-                  <button
-                    key={p}
-                    onClick={() => { setProviderDraft(p); setKeyDraft(''); setHasKey(!!getApiKey(p)); }}
-                    className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${providerDraft === p ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                  >
-                    {p === 'claude' ? 'Claude' : 'Gemini'}
-                  </button>
-                ))}
-              </div>
-
-              {/* Key status / input */}
-              {hasKey && !keyDraft ? (
-                <div className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 mb-3">
-                  <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">
-                    {t.ai?.keyConfigured || 'Key configured'} ✓
-                  </span>
-                  <button onClick={handleClear} className="text-[9px] font-black text-rose-400 hover:text-rose-600 uppercase tracking-widest transition-colors">
-                    {lang === 'no' ? 'Fjern' : 'Clear'}
-                  </button>
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-indigo-50 rounded-lg">
+                    <Sparkles size={16} className="text-indigo-600" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-black text-slate-700">{t.ai?.aiAssistant || 'AI Assistant'}</p>
+                    <p className="text-[9px] text-slate-500">{aiStatus.provider} • {t.ai?.ready || 'Ready'}</p>
+                  </div>
                 </div>
-              ) : null}
+                <button onClick={() => setShowAiPanel(false)} className="text-slate-300 hover:text-slate-500 transition-colors">
+                  <X size={14} />
+                </button>
+              </div>
 
-              <input
-                type="password"
-                placeholder={providerDraft === 'claude' ? 'sk-ant-api03-…' : 'AIza…'}
-                value={keyDraft}
-                onChange={e => setKeyDraft(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSave()}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-indigo-500 mb-3 transition-colors"
-                autoFocus={!hasKey}
-              />
+              {/* Status */}
+              <div className="space-y-3 mb-4">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-500">{t.ai?.status || 'Status'}</span>
+                  <div className="flex items-center gap-2">
+                    {aiStatus.isActive ? (
+                      <>
+                        <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
+                        <span className="text-indigo-600 font-medium">{t.ai?.active || 'Active'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check size={12} className="text-emerald-500" />
+                        <span className="text-emerald-600 font-medium">{t.ai?.ready || 'Ready'}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                
+                {aiStatus.operationCount > 0 && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">{t.ai?.operations || 'Operations'}</span>
+                    <span className="text-slate-700 font-medium">{aiStatus.operationCount} {t.ai?.completed || 'completed'}</span>
+                  </div>
+                )}
 
-              <button
-                onClick={handleSave}
-                disabled={!keyDraft.trim()}
-                className="w-full bg-indigo-600 text-white text-[10px] font-black py-3 rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {t.ai?.saveKey || 'Save key'}
-              </button>
+                {aiStatus.lastOperation && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">{t.ai?.lastUsed || 'Last used'}</span>
+                    <span className="text-slate-700 font-medium">
+                      {new Date(aiStatus.lastOperation.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                )}
+              </div>
 
-              <p className="text-[9px] text-slate-400 mt-3 leading-relaxed">{t.ai?.keyStoredLocally || 'Stored in your browser only.'}</p>
+              {/* Actions */}
+              <div className="space-y-2">
+                <button
+                  onClick={() => {
+                    setShowAiPanel(false);
+                    setShowAiModal(true);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-black bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors"
+                >
+                  <Sparkles size={14} />
+                  {t.ai?.configureApiKeyButton || 'Configure API Key'}
+                </button>
+                
+                {aiStatus.error && (
+                  <AiErrorHandler
+                    error={aiStatus.error}
+                    onConfigure={() => {
+                      setShowAiPanel(false);
+                      setShowAiModal(true);
+                    }}
+                    onRetry={aiStatus.clearError}
+                    onDismiss={aiStatus.clearError}
+                    className="text-xs"
+                    t={t}
+                  />
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -146,6 +191,19 @@ const Header: React.FC<{
           <button onClick={() => onLangChange('en')} className={`px-1.5 md:px-3 py-1 text-[8px] md:text-[10px] font-black uppercase tracking-widest rounded-md md:rounded-xl transition-all ${lang === 'en' ? 'bg-white shadow-md text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}>EN</button>
         </div>
       </div>
+
+      {/* AI Configuration Modal */}
+      <AiConfigModal
+        isOpen={showAiModal}
+        onClose={() => setShowAiModal(false)}
+        initialOperation={pendingOperation}
+        onSuccess={() => {
+          setShowAiModal(false);
+          setPendingOperation(null);
+        }}
+        t={t}
+        lang={lang}
+      />
     </header>
   );
 };

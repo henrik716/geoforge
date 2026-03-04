@@ -3,10 +3,9 @@ import { X, ArrowRight, Sparkles } from 'lucide-react';
 import { DataModel, ModelMetadata } from '../../types';
 import { InferredDataSummary } from '../../utils/importUtils';
 import {
-  AiProvider, AiAuthError,
-  getProvider, setProvider, getApiKey, saveApiKey,
   generateModelAbstract, suggestTheme, suggestKeywords,
 } from '../../utils/aiService';
+import { useAiContext } from '../../hooks/useAiContext';
 
 interface MetadataStepProps {
   model: DataModel;
@@ -23,6 +22,7 @@ type QpFeature = 'description' | 'theme' | 'keywords';
 const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateModel, onBack, onNext, t, lang = 'en' }) => {
   const q = t.quickPublish || {};
   const md = t.metadata || {};
+  const aiContext = useAiContext();
 
   const meta: ModelMetadata = model.metadata || {
     contactName: '', contactEmail: '', contactOrganization: '',
@@ -50,83 +50,52 @@ const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateMod
     setKwInput('');
   };
 
-  // AI state
-  const [aiLoading, setAiLoading] = useState<QpFeature | null>(null);
-  const [aiError, setAiError] = useState<QpFeature | null>(null);
-  const [showKeyInput, setShowKeyInput] = useState(false);
-  const [keyDraft, setKeyDraft] = useState('');
-  const [providerDraft, setProviderDraft] = useState<AiProvider>(getProvider());
-  const [pendingFeature, setPendingFeature] = useState<QpFeature | null>(null);
-
   const getLayers = () => model.layers.map(l => ({
     name: l.name,
     properties: (l.properties || []).map(p => ({ name: p.name, type: p.type })),
   }));
 
-  const runAi = async (feature: QpFeature, action: () => Promise<void>) => {
-    if (!getApiKey()) {
-      setProviderDraft(getProvider());
-      setPendingFeature(feature);
-      setShowKeyInput(true);
-      return;
-    }
-    setAiLoading(feature);
-    setAiError(null);
-    try {
-      await action();
-    } catch (e) {
-      if (e instanceof AiAuthError) {
-        setProviderDraft(getProvider());
-        setKeyDraft('');
-        setPendingFeature(feature);
-        setShowKeyInput(true);
-      } else {
-        setAiError(feature);
-      }
-    } finally {
-      setAiLoading(null);
-    }
+  const handleGenerateDesc = () => {
+    aiContext.setLoading('description', 'Generating description…');
+    generateModelAbstract({ modelName: model.name, layers: getLayers(), lang }).then(result => {
+      onUpdateModel({ ...model, description: result });
+      aiContext.setSuccess();
+    }).catch(error => {
+      aiContext.setError(error, 'description');
+    });
   };
 
-  const handleGenerateDesc = () => runAi('description', async () => {
-    const result = await generateModelAbstract({ modelName: model.name, layers: getLayers(), lang });
-    onUpdateModel({ ...model, description: result });
-  });
+  const handleSuggestTheme = () => {
+    aiContext.setLoading('theme', 'Suggesting theme…');
+    suggestTheme({ modelName: model.name, layers: getLayers(), lang, validThemes: md.themes || {} }).then(result => {
+      updateMeta({ theme: result.trim() });
+      aiContext.setSuccess();
+    }).catch(error => {
+      aiContext.setError(error, 'theme');
+    });
+  };
 
-  const handleSuggestTheme = () => runAi('theme', async () => {
-    const result = await suggestTheme({ modelName: model.name, layers: getLayers(), lang, validThemes: md.themes || {} });
-    updateMeta({ theme: result.trim() });
-  });
-
-  const handleSuggestKeywords = () => runAi('keywords', async () => {
-    const result = await suggestKeywords({ modelName: model.name, layers: getLayers(), lang });
-    updateMeta({ keywords: [...new Set([...meta.keywords, ...result])] });
-  });
-
-  const handleSaveKey = () => {
-    if (!keyDraft.trim()) return;
-    saveApiKey(keyDraft, providerDraft);
-    setProvider(providerDraft);
-    setShowKeyInput(false);
-    setKeyDraft('');
-    const feature = pendingFeature;
-    setPendingFeature(null);
-    if (feature === 'description') handleGenerateDesc();
-    else if (feature === 'theme') handleSuggestTheme();
-    else if (feature === 'keywords') handleSuggestKeywords();
+  const handleSuggestKeywords = () => {
+    aiContext.setLoading('keywords', 'Generating keywords…');
+    suggestKeywords({ modelName: model.name, layers: getLayers(), lang }).then(keywords => {
+      updateMeta({ keywords: [...new Set([...(meta.keywords || []), ...keywords])] });
+      aiContext.setSuccess();
+    }).catch(error => {
+      aiContext.setError(error, 'keywords');
+    });
   };
 
   const AiBtn: React.FC<{ feature: QpFeature; label: string; onClick: () => void }> = ({ feature, label, onClick }) => (
     <button
       type="button"
       onClick={onClick}
-      disabled={aiLoading !== null}
+      disabled={aiContext.isLoading}
       className={`flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg transition-all ${
-        aiError === feature ? 'text-rose-400 bg-rose-50' : 'text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50'
-      } ${aiLoading !== null ? 'opacity-50 cursor-not-allowed' : ''}`}
+        aiContext.error ? 'text-rose-400 bg-rose-50' : 'text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50'
+      } ${aiContext.isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
-      <Sparkles size={10} className={aiLoading === feature ? 'animate-pulse' : ''} />
-      {aiLoading === feature ? (t.ai?.generating || 'Generating…') : label}
+      <Sparkles size={10} className={aiContext.currentOperation === feature ? 'animate-pulse' : ''} />
+      {aiContext.currentOperation === feature ? (t.ai?.generating || 'Generating…') : label}
     </button>
   );
 
@@ -254,44 +223,6 @@ const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateMod
           {q.next} <ArrowRight size={16} />
         </button>
       </div>
-
-      {/* Key popover */}
-      {showKeyInput && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4" onClick={() => setShowKeyInput(false)}>
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 w-80 animate-in zoom-in-95 duration-150" onClick={e => e.stopPropagation()}>
-            <p className="text-xs font-black text-slate-700 mb-4">{t.ai?.enterKey || 'Enter your AI API key'}</p>
-            <div className="flex gap-2 mb-4">
-              {(['claude', 'gemini'] as AiProvider[]).map(p => (
-                <button
-                  key={p}
-                  onClick={() => { setProviderDraft(p); setKeyDraft(''); }}
-                  className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${providerDraft === p ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                >
-                  {p === 'claude' ? 'Claude' : 'Gemini'}
-                </button>
-              ))}
-            </div>
-            <input
-              type="password"
-              placeholder={providerDraft === 'claude' ? 'sk-ant-api03-…' : 'AIza…'}
-              value={keyDraft}
-              onChange={e => setKeyDraft(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-indigo-500 mb-3"
-              autoFocus
-            />
-            <div className="flex items-center gap-2">
-              <button onClick={handleSaveKey} className="flex-1 bg-indigo-600 text-white text-[10px] font-black py-3 rounded-xl hover:bg-indigo-700 transition-colors">
-                {t.ai?.saveKey || 'Save key'}
-              </button>
-              <button onClick={() => setShowKeyInput(false)} className="px-4 py-3 text-slate-400 text-[10px] font-black hover:text-slate-600">
-                {t.cancel || 'Cancel'}
-              </button>
-            </div>
-            <p className="text-[9px] text-slate-400 mt-3 leading-relaxed">{t.ai?.keyStoredLocally || 'Stored in your browser only.'}</p>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
