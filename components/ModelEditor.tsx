@@ -3,7 +3,7 @@ import {
   Plus, Trash2, Layers, LayoutList, MapPin, Globe, Palette, MousePointer2,
   GitCommit, Square, Hash, Shapes, Package,
   ChevronDown, ChevronUp, Edit3, Eye, Box,
-  Database, GripVertical, RotateCcw
+  Database, GripVertical, RotateCcw, Sparkles
 } from 'lucide-react';
 import { DataModel, Layer, ModelProperty, GeometryType, SharedType } from '../types';
 import { createEmptyProperty, createEmptyLayer, COLORS } from '../constants';
@@ -11,6 +11,8 @@ import { compareModels, getStructuredChanges } from '../utils/diffUtils';
 import { fetchModelHistory, fetchModelAtCommit, CommitInfo } from '../utils/githubService';
 import { useDragAndDropReorder } from '../hooks/useDragAndDropReorder';
 import { useRenderingOrder } from '../hooks/useRenderingOrder';
+import { useAiContext } from '../hooks/useAiContext';
+import { generateModelAbstract, generateLayerDescription } from '../utils/aiService';
 import PropertyEditor from './PropertyEditor';
 import StylePreview from './StylePreview';
 import LayerStyleEditor from './LayerStyleEditor';
@@ -63,7 +65,6 @@ const COMMON_CRS = [
   { code: 'EPSG:25835', name: 'EUREF89 UTM 35N (Øst)' },
   { code: 'EPSG:4258', name: 'ETRS89 (Europa)' },
 ];
-
 
 const GEOM_ICONS: Record<string, any> = {
   'Point': MapPin,
@@ -304,6 +305,54 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
     getItemId: (id) => id
   });
 
+  const aiContext = useAiContext();
+
+  const getLayersForAi = () => model.layers.map(l => ({
+    name: l.name,
+    properties: (l.properties || []).map(p => ({ name: p.name, type: p.type })),
+  }));
+
+  const handleGenerateDatasetDescription = () => {
+    aiContext.setLoading('abstract', 'Generating dataset description…');
+    generateModelAbstract({ modelName: model.name, layers: getLayersForAi(), lang }).then(result => {
+      onUpdate({ ...model, description: result });
+      aiContext.setSuccess();
+    }).catch(error => {
+      aiContext.setError(error, 'abstract');
+    });
+  };
+
+  const handleGenerateLayerDescription = () => {
+    if (!activeLayer) return;
+    aiContext.setLoading('description', 'Generating layer description…');
+    const layerProperties = activeLayer.properties.map(p => ({ name: p.name, type: p.type }));
+    generateLayerDescription({ 
+      layerName: activeLayer.name, 
+      geometryType: activeLayer.geometryType || 'None', 
+      properties: layerProperties, 
+      lang 
+    }).then(result => {
+      handleUpdateLayer({ description: result });
+      aiContext.setSuccess();
+    }).catch(error => {
+      aiContext.setError(error, 'description');
+    });
+  };
+
+  const AiBtn: React.FC<{ feature: 'abstract' | 'description'; label: string; onClick: () => void }> = ({ feature, label, onClick }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={aiContext.isLoading}
+      className={`flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg transition-all ${
+        aiContext.error ? 'text-rose-400 bg-rose-50' : 'text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50'
+      } ${aiContext.isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+      <Sparkles size={10} className={aiContext.currentOperation === feature ? 'animate-pulse' : ''} />
+      {aiContext.currentOperation === feature ? (t.ai?.generating || 'Generating…') : label}
+    </button>
+  );
+
   return (
     <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 lg:p-12 w-full custom-scrollbar scroll-smooth">
       {reviewMode && changes.length > 0 && structuredChanges && (
@@ -428,7 +477,25 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
                 </div>
 
                 <DiffField label={t.description} currentValue={model.description} baselineValue={baselineModel?.description} reviewMode={reviewMode}>
-                  <textarea placeholder={t.descriptionPlaceholder} value={model.description} onChange={e => onUpdate({ ...model, description: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-3 text-xs md:text-sm min-h-[60px] md:min-h-[80px] focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all resize-none leading-relaxed" />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <textarea 
+                          placeholder={t.descriptionPlaceholder} 
+                          value={model.description} 
+                          onChange={e => onUpdate({ ...model, description: e.target.value })} 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-3 text-xs md:text-sm min-h-[60px] md:min-h-[80px] focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all resize-none leading-relaxed" 
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <AiBtn 
+                        feature="abstract" 
+                        label={t.ai?.generateAbstract || 'Generate description'} 
+                        onClick={handleGenerateDatasetDescription} 
+                      />
+                    </div>
+                  </div>
                 </DiffField>
               </div>
             </div>
@@ -645,7 +712,21 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
                     )}
                   </div>
 
-                  <textarea placeholder={t.descriptionPlaceholder} value={activeLayer.description} onChange={e => handleUpdateLayer({ description: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-4 md:px-5 md:py-4 text-xs md:text-sm min-h-[60px] md:min-h-[80px] focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all resize-none leading-relaxed" />
+                  <div className="space-y-2">
+                    <textarea 
+                      placeholder={t.descriptionPlaceholder} 
+                      value={activeLayer.description} 
+                      onChange={e => handleUpdateLayer({ description: e.target.value })} 
+                      className="w-full bg-slate-50 border border-slate-200 rounded-[18px] md:rounded-[20px] px-4 py-4 md:px-5 md:py-4 text-xs md:text-sm min-h-[60px] md:min-h-[80px] focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all resize-none leading-relaxed" 
+                    />
+                    <div className="flex justify-end">
+                      <AiBtn 
+                        feature="description" 
+                        label={t.ai?.generateDescription || 'Generate description'} 
+                        onClick={handleGenerateLayerDescription} 
+                      />
+                    </div>
+                  </div>
               </div>
 
               <div className="space-y-4 md:space-y-6">

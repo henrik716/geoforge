@@ -223,6 +223,19 @@ export async function suggestKeywords(params: {
   }
 }
 
+export async function generateLayerDescription(params: {
+  layerName: string;
+  geometryType: string;
+  properties: Array<{ name: string; type: string }>;
+  lang: string;
+}): Promise<string> {
+  const langInstruction = params.lang === 'no' ? 'Svar kun på norsk.' : 'Reply in English only.';
+  const propsSummary = params.properties.slice(0, 8).map(p => `${p.name} (${p.type})`).join(', ');
+  const system = `You are a geospatial metadata specialist. Write a concise, professional layer description for use in a geographic data model (2-3 sentences max). Describe what this layer contains, its purpose, and key attributes. ${langInstruction} Output ONLY the description text, no quotes, no preamble.`;
+  const user = `Layer name: "${params.layerName}"\nGeometry type: ${params.geometryType}\nProperties: ${propsSummary || '(no properties)'}`;
+  return callAI(system, user);
+}
+
 export async function generateModelAbstract(params: {
   modelName: string;
   layers: Array<{ name: string; properties: Array<{ name: string; type: string }> }>;
