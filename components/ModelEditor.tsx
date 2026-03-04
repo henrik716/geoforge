@@ -584,21 +584,23 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
                           const baselineProp = baselineLayer?.properties.find(p => p.id === prop.id);
                           
                           return (
-                            <PropertyEditor 
-                              key={prop.id} 
-                              prop={prop} 
+                            <PropertyEditor
+                              key={prop.id}
+                              prop={prop}
                               baselineProp={baselineProp}
-                              onUpdate={handleUpdateProperty} 
-                              onDelete={handleDeleteProperty} 
-                              onMove={(dir) => handleMoveProperty(prop.id, dir)} 
-                              isFirst={idx === 0} 
-                              isLast={idx === displayProperties.length - 1} 
-                              t={t} 
+                              onUpdate={handleUpdateProperty}
+                              onDelete={handleDeleteProperty}
+                              onMove={(dir) => handleMoveProperty(prop.id, dir)}
+                              isFirst={idx === 0}
+                              isLast={idx === displayProperties.length - 1}
+                              t={t}
                               allLayers={model.layers.map(l => ({ id: l.id, name: l.name }))}
                               sharedTypes={sharedTypes}
                               change={isGhost ? { type: 'deleted', itemType: 'property', itemName: prop.name } : propChange}
                               isGhost={isGhost}
                               reviewMode={reviewMode}
+                              layerName={activeLayer.name}
+                              lang={lang}
                             />
                           );
                         });

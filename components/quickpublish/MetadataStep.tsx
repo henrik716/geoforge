@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
-import { X, ArrowRight } from 'lucide-react';
+import { X, ArrowRight, Sparkles } from 'lucide-react';
 import { DataModel, ModelMetadata } from '../../types';
 import { InferredDataSummary } from '../../utils/importUtils';
+import {
+  AiProvider, AiAuthError,
+  getProvider, setProvider, getApiKey, saveApiKey,
+  generateModelAbstract, suggestTheme, suggestKeywords,
+} from '../../utils/aiService';
 
 interface MetadataStepProps {
   model: DataModel;
@@ -10,9 +15,12 @@ interface MetadataStepProps {
   onBack: () => void;
   onNext: () => void;
   t: any;
+  lang?: string;
 }
 
-const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateModel, onBack, onNext, t }) => {
+type QpFeature = 'description' | 'theme' | 'keywords';
+
+const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateModel, onBack, onNext, t, lang = 'en' }) => {
   const q = t.quickPublish || {};
   const md = t.metadata || {};
 
@@ -42,6 +50,86 @@ const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateMod
     setKwInput('');
   };
 
+  // AI state
+  const [aiLoading, setAiLoading] = useState<QpFeature | null>(null);
+  const [aiError, setAiError] = useState<QpFeature | null>(null);
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [keyDraft, setKeyDraft] = useState('');
+  const [providerDraft, setProviderDraft] = useState<AiProvider>(getProvider());
+  const [pendingFeature, setPendingFeature] = useState<QpFeature | null>(null);
+
+  const getLayers = () => model.layers.map(l => ({
+    name: l.name,
+    properties: (l.properties || []).map(p => ({ name: p.name, type: p.type })),
+  }));
+
+  const runAi = async (feature: QpFeature, action: () => Promise<void>) => {
+    if (!getApiKey()) {
+      setProviderDraft(getProvider());
+      setPendingFeature(feature);
+      setShowKeyInput(true);
+      return;
+    }
+    setAiLoading(feature);
+    setAiError(null);
+    try {
+      await action();
+    } catch (e) {
+      if (e instanceof AiAuthError) {
+        setProviderDraft(getProvider());
+        setKeyDraft('');
+        setPendingFeature(feature);
+        setShowKeyInput(true);
+      } else {
+        setAiError(feature);
+      }
+    } finally {
+      setAiLoading(null);
+    }
+  };
+
+  const handleGenerateDesc = () => runAi('description', async () => {
+    const result = await generateModelAbstract({ modelName: model.name, layers: getLayers(), lang });
+    onUpdateModel({ ...model, description: result });
+  });
+
+  const handleSuggestTheme = () => runAi('theme', async () => {
+    const result = await suggestTheme({ modelName: model.name, layers: getLayers(), lang, validThemes: md.themes || {} });
+    updateMeta({ theme: result.trim() });
+  });
+
+  const handleSuggestKeywords = () => runAi('keywords', async () => {
+    const result = await suggestKeywords({ modelName: model.name, layers: getLayers(), lang });
+    updateMeta({ keywords: [...new Set([...meta.keywords, ...result])] });
+  });
+
+  const handleSaveKey = () => {
+    if (!keyDraft.trim()) return;
+    saveApiKey(keyDraft, providerDraft);
+    setProvider(providerDraft);
+    setShowKeyInput(false);
+    setKeyDraft('');
+    const feature = pendingFeature;
+    setPendingFeature(null);
+    if (feature === 'description') handleGenerateDesc();
+    else if (feature === 'theme') handleSuggestTheme();
+    else if (feature === 'keywords') handleSuggestKeywords();
+  };
+
+  const AiBtn: React.FC<{ feature: QpFeature; label: string; onClick: () => void }> = ({ feature, label, onClick }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={aiLoading !== null}
+      className={`flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg transition-all ${
+        aiError === feature ? 'text-rose-400 bg-rose-50' : 'text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50'
+      } ${aiLoading !== null ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+      <Sparkles size={10} className={aiLoading === feature ? 'animate-pulse' : ''} />
+      {aiLoading === feature ? (t.ai?.generating || 'Generating…') : label}
+    </button>
+  );
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400">
       <div className="space-y-2">
@@ -61,7 +149,10 @@ const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateMod
 
       {/* Description */}
       <div className="space-y-1.5">
-        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{t.descriptionPlaceholder?.split('...')[0] || 'Beskrivelse'}</label>
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{t.descriptionPlaceholder?.split('...')[0] || 'Description'}</label>
+          <AiBtn feature="description" label={t.ai?.generateAbstract || 'Generate description'} onClick={handleGenerateDesc} />
+        </div>
         <textarea
           value={model.description}
           onChange={e => onUpdateModel({ ...model, description: e.target.value })}
@@ -114,7 +205,10 @@ const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateMod
       {/* Theme + License */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.theme}</label>
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.theme}</label>
+            <AiBtn feature="theme" label={t.ai?.suggestTheme || 'Suggest theme'} onClick={handleSuggestTheme} />
+          </div>
           <select value={meta.theme} onChange={e => updateMeta({ theme: e.target.value })} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold appearance-none outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all cursor-pointer">
             <option value="">—</option>
             {Object.entries(md.themes || {}).map(([k, v]) => <option key={k} value={k}>{String(v)}</option>)}
@@ -130,7 +224,10 @@ const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateMod
 
       {/* Keywords */}
       <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.keywords}</label>
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{md.keywords}</label>
+          <AiBtn feature="keywords" label={t.ai?.suggestKeywords || 'Suggest keywords'} onClick={handleSuggestKeywords} />
+        </div>
         <div className="flex flex-wrap gap-2 min-h-[40px]">
           {meta.keywords.map((kw, i) => (
             <span key={i} className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold">
@@ -157,6 +254,44 @@ const MetadataStep: React.FC<MetadataStepProps> = ({ model, summary, onUpdateMod
           {q.next} <ArrowRight size={16} />
         </button>
       </div>
+
+      {/* Key popover */}
+      {showKeyInput && (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4" onClick={() => setShowKeyInput(false)}>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 w-80 animate-in zoom-in-95 duration-150" onClick={e => e.stopPropagation()}>
+            <p className="text-xs font-black text-slate-700 mb-4">{t.ai?.enterKey || 'Enter your AI API key'}</p>
+            <div className="flex gap-2 mb-4">
+              {(['claude', 'gemini'] as AiProvider[]).map(p => (
+                <button
+                  key={p}
+                  onClick={() => { setProviderDraft(p); setKeyDraft(''); }}
+                  className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${providerDraft === p ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                >
+                  {p === 'claude' ? 'Claude' : 'Gemini'}
+                </button>
+              ))}
+            </div>
+            <input
+              type="password"
+              placeholder={providerDraft === 'claude' ? 'sk-ant-api03-…' : 'AIza…'}
+              value={keyDraft}
+              onChange={e => setKeyDraft(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-indigo-500 mb-3"
+              autoFocus
+            />
+            <div className="flex items-center gap-2">
+              <button onClick={handleSaveKey} className="flex-1 bg-indigo-600 text-white text-[10px] font-black py-3 rounded-xl hover:bg-indigo-700 transition-colors">
+                {t.ai?.saveKey || 'Save key'}
+              </button>
+              <button onClick={() => setShowKeyInput(false)} className="px-4 py-3 text-slate-400 text-[10px] font-black hover:text-slate-600">
+                {t.cancel || 'Cancel'}
+              </button>
+            </div>
+            <p className="text-[9px] text-slate-400 mt-3 leading-relaxed">{t.ai?.keyStoredLocally || 'Stored in your browser only.'}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
