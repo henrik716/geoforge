@@ -59,6 +59,10 @@ export function getApiKey(p?: AiProvider): string | null {
   return localStorage.getItem(API_KEY_PREFIX + (p ?? getProvider()));
 }
 
+export function hasApiKey(p?: AiProvider): boolean {
+  return !!getApiKey(p);
+}
+
 export function saveApiKey(key: string, p?: AiProvider): void {
   localStorage.setItem(API_KEY_PREFIX + (p ?? getProvider()), key.trim());
   // Dispatch custom event to notify components about the API key change

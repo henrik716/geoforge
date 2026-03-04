@@ -10,7 +10,7 @@ import ConstraintsEditor from './property/ConstraintsEditor';
 import CodelistEditor from './property/CodelistEditor';
 import {
   AiProvider, AiConstraintSuggestion,
-  generatePropertyDescription, suggestFieldType, inferConstraints,
+  generatePropertyDescription, suggestFieldType, inferConstraints, hasApiKey,
 } from '../utils/aiService';
 import { useAiContext } from '../hooks/useAiContext';
 import AiLoadingSkeleton from './ai/AiLoadingSkeleton';
@@ -91,6 +91,13 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
   const aiContext = useAiContext();
 
   const handleGenerateDescription = () => {
+    if (!hasApiKey()) {
+      window.dispatchEvent(new CustomEvent('ai-configure-required', {
+        detail: { operation: 'description' }
+      }));
+      return;
+    }
+    
     aiContext.setLoading('description', `Generating description for "${prop.name}"…`);
     generatePropertyDescription({
       fieldName: prop.name || 'field',
@@ -106,6 +113,13 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
   };
 
   const handleSuggestType = () => {
+    if (!hasApiKey()) {
+      window.dispatchEvent(new CustomEvent('ai-configure-required', {
+        detail: { operation: 'type' }
+      }));
+      return;
+    }
+    
     aiContext.setLoading('type', `Analyzing "${prop.name}" to suggest type…`);
     suggestFieldType({
       fieldName: prop.name || 'field',
@@ -124,6 +138,13 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
   };
 
   const handleInferConstraints = () => {
+    if (!hasApiKey()) {
+      window.dispatchEvent(new CustomEvent('ai-configure-required', {
+        detail: { operation: 'constraints' }
+      }));
+      return;
+    }
+    
     aiContext.setLoading('constraints', `Inferring constraints for "${prop.name}"…`);
     inferConstraints({
       fieldName: prop.name || 'field',

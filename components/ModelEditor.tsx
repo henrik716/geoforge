@@ -12,7 +12,7 @@ import { fetchModelHistory, fetchModelAtCommit, CommitInfo } from '../utils/gith
 import { useDragAndDropReorder } from '../hooks/useDragAndDropReorder';
 import { useRenderingOrder } from '../hooks/useRenderingOrder';
 import { useAiContext } from '../hooks/useAiContext';
-import { generateModelAbstract, generateLayerDescription } from '../utils/aiService';
+import { generateModelAbstract, generateLayerDescription, hasApiKey } from '../utils/aiService';
 import PropertyEditor from './PropertyEditor';
 import StylePreview from './StylePreview';
 import LayerStyleEditor from './LayerStyleEditor';
@@ -313,6 +313,13 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
   }));
 
   const handleGenerateDatasetDescription = () => {
+    if (!hasApiKey()) {
+      window.dispatchEvent(new CustomEvent('ai-configure-required', {
+        detail: { operation: 'abstract' }
+      }));
+      return;
+    }
+    
     aiContext.setLoading('abstract', 'Generating dataset description…');
     generateModelAbstract({ modelName: model.name, layers: getLayersForAi(), lang }).then(result => {
       onUpdate({ ...model, description: result });
@@ -324,6 +331,14 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
 
   const handleGenerateLayerDescription = () => {
     if (!activeLayer) return;
+    
+    if (!hasApiKey()) {
+      window.dispatchEvent(new CustomEvent('ai-configure-required', {
+        detail: { operation: 'description' }
+      }));
+      return;
+    }
+    
     aiContext.setLoading('description', 'Generating layer description…');
     const layerProperties = activeLayer.properties.map(p => ({ name: p.name, type: p.type }));
     generateLayerDescription({ 
