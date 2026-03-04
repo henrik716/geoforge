@@ -7,7 +7,7 @@ export interface CodeValue {
   description?: string;
 }
 
-export type PropertyType = 'string' | 'number' | 'integer' | 'boolean' | 'date' | 'geometry' | 'codelist' | 'json' | 'relation' | 'object' | 'array';
+export type PropertyType = 'string' | 'number' | 'integer' | 'boolean' | 'date' | 'geometry' | 'codelist' | 'json' | 'relation' | 'object' | 'array' | 'shared_type';
 
 export type GeometryType = 'Point' | 'LineString' | 'Polygon' | 'MultiPoint' | 'MultiLineString' | 'MultiPolygon' | 'GeometryCollection' | 'None'; 
 
@@ -40,7 +40,8 @@ export interface ModelProperty {
     relationType: 'foreign_key' | 'intersects' | 'contains' | 'within' | 'touches' | 'crosses';
     cascadeDelete?: boolean;
   };
-  subProperties?: ModelProperty[]; 
+  subProperties?: ModelProperty[];
+  sharedTypeId?: string;
 }
 
 export interface LayerStyle {

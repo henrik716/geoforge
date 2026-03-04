@@ -37,8 +37,8 @@ const LandingScreen: React.FC<LandingScreenProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-12 bg-slate-50 overflow-y-auto">
-      <div className="w-full max-w-4xl space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="flex-1 flex flex-col items-center p-6 md:p-12 pt-16 md:pt-16 bg-slate-50 overflow-y-auto">
+      <div className="w-full max-w-4xl space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700 mt-4 md:mt-6">
 
         {/* Header */}
         <div className="text-center space-y-3">

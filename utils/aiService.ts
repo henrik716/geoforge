@@ -31,6 +31,22 @@ export class AiAuthError extends Error {
   }
 }
 
+export class AiRateLimitError extends Error {
+  retryAfter: number;
+  constructor(retryAfter: number = 60) {
+    super(`Rate limit exceeded. Retry after ${retryAfter} seconds`);
+    this.name = 'AiRateLimitError';
+    this.retryAfter = retryAfter;
+  }
+}
+
+export class AiNetworkError extends Error {
+  constructor(message: string = 'Network error') {
+    super(message);
+    this.name = 'AiNetworkError';
+  }
+}
+
 export function getProvider(): AiProvider {
   return (localStorage.getItem(PROVIDER_KEY) as AiProvider) ?? 'claude';
 }
@@ -64,43 +80,69 @@ async function callAI(system: string, user: string): Promise<string> {
   const key = getApiKey();
   if (!key) throw new AiKeyMissingError();
 
-  if (provider === 'claude') {
-    const res = await fetch(CLAUDE_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 512,
-        system,
-        messages: [{ role: 'user', content: user }],
-      }),
-    });
-    if (!res.ok) {
-      if (res.status === 401) throw new AiAuthError();
-      throw new Error(`API error ${res.status}`);
+  try {
+    if (provider === 'claude') {
+      const res = await fetch(CLAUDE_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: CLAUDE_MODEL,
+          max_tokens: 512,
+          system,
+          messages: [{ role: 'user', content: user }],
+        }),
+      });
+      
+      if (!res.ok) {
+        if (res.status === 401) throw new AiAuthError();
+        if (res.status === 429) {
+          const retryAfter = res.headers.get('retry-after');
+          throw new AiRateLimitError(retryAfter ? parseInt(retryAfter) : 60);
+        }
+        if (res.status >= 500) throw new AiNetworkError(`Server error: ${res.status}`);
+        throw new Error(`API error ${res.status}: ${res.statusText}`);
+      }
+      
+      const data = await res.json();
+      const result = data.content?.[0]?.text?.trim() ?? '';
+      if (!result) throw new Error('AI returned empty response');
+      return result;
+      
+    } else {
+      const res = await fetch(`${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=${key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: user }] }],
+        }),
+      });
+      
+      if (!res.ok) {
+        if (res.status === 400 || res.status === 403) throw new AiAuthError();
+        if (res.status === 429) {
+          const retryAfter = res.headers.get('retry-after');
+          throw new AiRateLimitError(retryAfter ? parseInt(retryAfter) : 60);
+        }
+        if (res.status >= 500) throw new AiNetworkError(`Server error: ${res.status}`);
+        throw new Error(`API error ${res.status}: ${res.statusText}`);
+      }
+      
+      const data = await res.json();
+      const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
+      if (!result) throw new Error('AI returned empty response');
+      return result;
     }
-    const data = await res.json();
-    return data.content?.[0]?.text?.trim() ?? '';
-  } else {
-    const res = await fetch(`${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=${key}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: user }] }],
-      }),
-    });
-    if (!res.ok) {
-      if (res.status === 400 || res.status === 403) throw new AiAuthError();
-      throw new Error(`API error ${res.status}`);
+  } catch (error) {
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      throw new AiNetworkError('Network connection failed');
     }
-    const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
+    throw error;
   }
 }
 
