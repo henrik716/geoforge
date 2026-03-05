@@ -11,6 +11,14 @@ RUN npm ci --prefer-offline --no-audit
 # Copy application files
 COPY . .
 
+# Declare build-time variables (values come from Railway dashboard)
+ARG VITE_GITHUB_CLIENT_ID
+ARG VITE_GITHUB_REDIRECT_URI
+ARG GEMINI_API_KEY
+ENV VITE_GITHUB_CLIENT_ID=$VITE_GITHUB_CLIENT_ID
+ENV VITE_GITHUB_REDIRECT_URI=$VITE_GITHUB_REDIRECT_URI
+ENV GEMINI_API_KEY=$GEMINI_API_KEY
+
 # Build the application
 RUN npm run build
 
