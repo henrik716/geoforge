@@ -40,7 +40,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({ model, onUpdate, isOp
       layers: getLayers(),
       lang,
     }).then(abstract => {
-      onUpdate({ ...model, metadata: { ...model.metadata, abstract } });
+      onUpdate({ ...model, metadata: { ...model.metadata, purpose: abstract } });
       aiContext.setSuccess();
     }).catch(error => {
       aiContext.setError(error, 'abstract');
