@@ -60,44 +60,89 @@
     </div>
 
     <script>
-        // Get the authorization code from URL parameters
-        const urlParams = new URLSearchParams(window.location.search);
-        const code = urlParams.get('code');
-        const error = urlParams.get('error');
-        const errorDescription = urlParams.get('error_description');
-
-        console.log('OAuth callback received:', { code: code ? 'present' : 'missing', error, errorDescription });
-
-        if (error) {
-            // Send error to parent window
-            window.opener.postMessage({
-                type: 'oauth-error',
-                error: errorDescription || error
-            }, window.location.origin);
-            
-            // Show error and close
-            document.getElementById('status').textContent = 'Authentication failed: ' + (errorDescription || error);
-            setTimeout(() => window.close(), 3000);
-        } else if (code) {
-            // Send authorization code to parent window for token exchange
-            window.opener.postMessage({
-                type: 'oauth-code',
-                code: code
-            }, window.location.origin);
-            
-            // Show success and close
-            document.getElementById('status').textContent = 'Authentication successful!';
-            setTimeout(() => window.close(), 1500);
-        } else {
-            // No code and no error
-            window.opener.postMessage({
-                type: 'oauth-error',
-                error: 'No authorization code received'
-            }, window.location.origin);
-            
-            document.getElementById('status').textContent = 'Authentication failed: No code received';
-            setTimeout(() => window.close(), 3000);
+        function showError(msg) {
+            document.querySelector('.spinner').style.display = 'none';
+            document.getElementById('status').textContent = 'Authentication failed';
+            document.getElementById('message').innerHTML = '<div class="error">' + msg + '</div>';
         }
+
+        function showSuccess(msg) {
+            document.querySelector('.spinner').style.display = 'none';
+            document.getElementById('status').textContent = msg;
+            document.getElementById('message').innerHTML = '<div class="success">You can close this tab.</div>';
+        }
+
+        async function handleCallback() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            const error = urlParams.get('error');
+            const errorDescription = urlParams.get('error_description');
+
+            if (error) {
+                localStorage.setItem('github_oauth_error', errorDescription || error);
+                showError(errorDescription || error);
+                setTimeout(() => window.close(), 2000);
+                return;
+            }
+
+            if (!code) {
+                localStorage.setItem('github_oauth_error', 'No authorization code received');
+                showError('No authorization code received');
+                setTimeout(() => window.close(), 2000);
+                return;
+            }
+
+            const codeVerifier = localStorage.getItem('github_code_verifier');
+            const redirectUri = window.location.origin + window.location.pathname;
+
+            try {
+                const res = await fetch('/api/github-oauth', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, code_verifier: codeVerifier, redirect_uri: redirectUri })
+                });
+
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({ error: 'Token exchange failed' }));
+                    throw new Error(errData.error || 'Token exchange failed');
+                }
+
+                const tokenData = await res.json();
+
+                // Store token in the same format as oauthService.storeToken()
+                const tokenInfo = {
+                    ...tokenData,
+                    stored_at: Date.now(),
+                    expires_at: tokenData.expires_in ? Date.now() + tokenData.expires_in * 1000 : null
+                };
+                localStorage.setItem('github_oauth_token', JSON.stringify(tokenInfo));
+                localStorage.removeItem('github_code_verifier');
+
+                // Fetch and store user data so the original tab has everything it needs
+                const userRes = await fetch('https://api.github.com/user', {
+                    headers: {
+                        'Authorization': 'Bearer ' + tokenData.access_token,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                });
+                if (userRes.ok) {
+                    const userData = await userRes.json();
+                    localStorage.setItem('github_user', JSON.stringify(userData));
+                }
+
+                // The storage event fired above will notify the original tab.
+                // Show success and close this tab.
+                showSuccess('Authentication successful!');
+                setTimeout(() => window.close(), 1500);
+            } catch (err) {
+                const message = err instanceof Error ? err.message : 'Authentication failed';
+                localStorage.setItem('github_oauth_error', message);
+                showError(message);
+                setTimeout(() => window.close(), 3000);
+            }
+        }
+
+        handleCallback();
     </script>
 </body>
 </html>

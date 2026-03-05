@@ -1,15 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   getToken,
-  storeToken,
   clearToken,
   getUser,
-  storeUser,
-  getGitHubUser,
   initiateOAuth,
-  handleOAuthCallback,
-  exchangeCodeForToken,
-  exchangeCodeForTokenWithProxy,
   getUserRepositories,
   getRepositoryBranches,
   isOAuthConfigured,
@@ -65,34 +59,6 @@ export const useGitHubAuth = (): GitHubAuthState & GitHubAuthActions => {
           isLoading: false
         }));
 
-        // Handle OAuth callback if we're on the callback page
-        if (window.location.pathname === '/oauth/callback' && window.location.search.includes('code=')) {
-          try {
-            const tokenData = await handleOAuthCallback();
-            storeToken(tokenData);
-            
-            const userData = await getGitHubUser(tokenData.access_token);
-            storeUser(userData);
-            
-            setState(prev => ({
-              ...prev,
-              isAuthenticated: true,
-              token: tokenData,
-              user: userData,
-              isLoading: false
-            }));
-            
-            // Redirect to main app
-            window.location.href = '/';
-          } catch (error) {
-            console.error('OAuth callback error:', error);
-            setState(prev => ({
-              ...prev,
-              error: error instanceof Error ? error.message : 'OAuth callback failed',
-              isLoading: false
-            }));
-          }
-        }
       } catch (error) {
         setState(prev => ({
           ...prev,
@@ -105,23 +71,15 @@ export const useGitHubAuth = (): GitHubAuthState & GitHubAuthActions => {
     initializeAuth();
   }, []);
 
-  // Listen for OAuth popup messages
+  // Listen for OAuth completion via storage events.
+  // The oauth-callback.html page writes the token to localStorage after exchanging
+  // the authorization code, which fires a storage event in this (original) tab.
   useEffect(() => {
-    const messageHandler = async (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      
-      if (event.data.type === 'oauth-code') {
-        // Received authorization code from popup, now exchange for token
+    const storageHandler = (event: StorageEvent) => {
+      if (event.key === 'github_oauth_token' && event.newValue) {
         try {
-          setState(prev => ({ ...prev, isLoading: true, error: null }));
-          
-          // Use a CORS proxy for the token exchange
-          const tokenData = await exchangeCodeForTokenWithProxy(event.data.code);
-          storeToken(tokenData);
-          
-          const userData = await getGitHubUser(tokenData.access_token);
-          storeUser(userData);
-          
+          const tokenData = JSON.parse(event.newValue);
+          const userData = getUser();
           setState(prev => ({
             ...prev,
             isAuthenticated: true,
@@ -130,38 +88,14 @@ export const useGitHubAuth = (): GitHubAuthState & GitHubAuthActions => {
             isLoading: false,
             error: null
           }));
-        } catch (error) {
-          console.error('Token exchange error:', error);
-          setState(prev => ({
-            ...prev,
-            error: error instanceof Error ? error.message : 'Failed to exchange authorization code',
-            isLoading: false
-          }));
+        } catch {
+          // ignore parse errors
         }
-      } else if (event.data.type === 'oauth-success') {
-        const { token, user } = event.data;
-        storeToken(token);
-        storeUser(user);
-        
-        setState(prev => ({
-          ...prev,
-          isAuthenticated: true,
-          token,
-          user,
-          isLoading: false,
-          error: null
-        }));
-      } else if (event.data.type === 'oauth-error') {
-        setState(prev => ({
-          ...prev,
-          error: event.data.error,
-          isLoading: false
-        }));
       }
     };
-    
-    window.addEventListener('message', messageHandler);
-    return () => window.removeEventListener('message', messageHandler);
+
+    window.addEventListener('storage', storageHandler);
+    return () => window.removeEventListener('storage', storageHandler);
   }, []);
 
   const login = useCallback(async () => {

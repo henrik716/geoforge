@@ -130,11 +130,19 @@ export const getUser = (): GitHubUser | null => {
 
 // OAuth flow functions
 export const initiateOAuth = async (): Promise<void> => {
+  // Open a blank tab SYNCHRONOUSLY before any await — this preserves the
+  // user-gesture chain required by iOS Safari. Mobile browsers block
+  // window.open() calls made after an await.
+  const authWindow = window.open('about:blank', '_blank');
+
   const { codeVerifier, codeChallenge } = await generatePKCE();
-  
-  // Store code verifier for later use
+
+  // Store code verifier in both storages:
+  // - localStorage survives cross-tab navigation and iOS Safari redirect quirks
+  // - sessionStorage kept for any legacy paths
+  localStorage.setItem('github_code_verifier', codeVerifier);
   sessionStorage.setItem('github_code_verifier', codeVerifier);
-  
+
   const params = new URLSearchParams({
     client_id: DEFAULT_CONFIG.clientId,
     redirect_uri: DEFAULT_CONFIG.redirectUri,
@@ -143,52 +151,47 @@ export const initiateOAuth = async (): Promise<void> => {
     code_challenge: codeChallenge,
     code_challenge_method: 'S256'
   });
-  
+
   const authUrl = `https://github.com/login/oauth/authorize?${params.toString()}`;
-  
-  // Open OAuth in popup window
-  const popup = window.open(
-    authUrl,
-    'github-oauth',
-    'width=600,height=700,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no'
-  );
-  
-  if (!popup) {
-    throw new Error('Popup blocked. Please allow popups for this site.');
+
+  if (authWindow && !authWindow.closed) {
+    // Navigate the already-open tab to GitHub
+    authWindow.location.href = authUrl;
+  } else {
+    // Tab was blocked entirely — last-resort full-page redirect
+    window.location.href = authUrl;
+    return new Promise(() => {}); // never resolves; page navigates away
   }
-  
-  // Listen for popup closure
+
+  // Wait for the callback tab to complete token exchange and write to localStorage
   return new Promise((resolve, reject) => {
-    const checkClosed = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(checkClosed);
-        reject(new Error('OAuth window was closed'));
-      }
-    }, 1000);
-    
-    // Listen for message from popup
-    const messageHandler = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      
-      if (event.data.type === 'oauth-success') {
-        clearInterval(checkClosed);
-        popup.close();
-        window.removeEventListener('message', messageHandler);
+    const timeout = setTimeout(() => {
+      window.removeEventListener('storage', storageHandler);
+      reject(new Error('Authentication timed out'));
+    }, 5 * 60 * 1000);
+
+    const storageHandler = (event: StorageEvent) => {
+      if (event.key === 'github_oauth_token' && event.newValue) {
+        clearTimeout(timeout);
+        window.removeEventListener('storage', storageHandler);
         resolve();
-      } else if (event.data.type === 'oauth-error') {
-        clearInterval(checkClosed);
-        popup.close();
-        window.removeEventListener('message', messageHandler);
-        reject(new Error(event.data.error));
+      } else if (event.key === 'github_oauth_error' && event.newValue) {
+        clearTimeout(timeout);
+        window.removeEventListener('storage', storageHandler);
+        localStorage.removeItem('github_oauth_error');
+        reject(new Error(event.newValue));
       }
     };
-    
-    window.addEventListener('message', messageHandler);
+
+    window.addEventListener('storage', storageHandler);
   });
 };
 
 export const exchangeCodeForTokenWithProxy = async (code: string): Promise<TokenResponse> => {
-  const codeVerifier = sessionStorage.getItem('github_code_verifier');
+  const codeVerifier =
+    sessionStorage.getItem('github_code_verifier') ||
+    localStorage.getItem('github_code_verifier');
+  localStorage.removeItem('github_code_verifier');
   if (!codeVerifier) {
     throw new Error('Code verifier not found');
   }
