@@ -92,16 +92,16 @@ GeoForge can read and write model definitions directly to GitHub repositories fo
 
 A completed GeoForge model generates:
 
-- **pygeoapi config** — OGC API – Features (REST), WFS, and WMS endpoints
+- **pygeoapi config** — OGC API – Features (REST) endpoints
+- **QGIS Server config** — WMS endpoints for styled map rendering
 - **Docker Compose** — self-hosted deployment with pygeoapi + QGIS Server
 - **Cloud configs** — Fly.io and Railway manifests
 - **GHCR image push** — GitHub Container Registry CI/CD setup
 
 ## Supported Standards
 
-- OGC API – Features (OGC API)
-- WMS (Web Map Service)
-- WFS (Web Feature Service)
+- OGC API – Features (via pygeoapi)
+- WMS — Web Map Service (via QGIS Server)
 - GeoPackage, GeoJSON, GML, Shapefile (import)
 
 ## Language Support
