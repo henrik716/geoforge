@@ -282,6 +282,41 @@ export const no = {
       githubBasePath: "Mappesti i repo",
       githubBasePathPlaceholder: "tjenester/mitt-datasett",
       githubBasePathHint: "Valgfri undermappe. Tomt = rot i repoet.",
+      // OAuth Authentication
+      oauth: {
+        title: "GitHub OAuth",
+        recommended: "Bruk GitHub OAuth (Anbefalt)",
+        recommendedDesc: "Mer sikker og enklere enn tokens",
+        enableButton: "Aktiver OAuth",
+        enabled: "OAuth-autentisering aktivert",
+        connectToBrowse: "Koble til GitHub for å bla gjennom repositories",
+        selectRepository: "Velg repository for publisering",
+        switchToManual: "← Bytt til manuell token-inntasting",
+        manualConfig: "Manuell token-konfigurasjon",
+        benefits: {
+          noTokens: "Ingen behov for å lage personlige access tokens",
+          autoManagement: "Automatisk token-håndtering og refresh",
+          visualBrowse: "Bla gjennom og velg repositories visuelt"
+        },
+        auth: {
+          connectGitHub: "Koble til GitHub",
+          connectAccount: "Koble til GitHub-konto",
+          connected: "Tilkoblet GitHub",
+          disconnect: "Koble fra GitHub",
+          notConfigured: "OAuth ikke konfigurert",
+          notConfiguredDesc: "Sett VITE_GITHUB_CLIENT_ID og VITE_GITHUB_CLIENT_SECRET miljøvariabler for å aktivere OAuth-autentisering.",
+          welcomeConnected: "Flott! Du er koblet til GitHub",
+          loadingRepos: "Laster dine repositories...",
+          connectToBrowseRepos: "Koble din GitHub-konto for å bla gjennom repositories"
+        },
+        repoBrowser: {
+          chooseRepository: "Velg et repository:",
+          selectedRepository: "Valgt repository:",
+          searchPlaceholder: "Søk i repositories...",
+          branch: "Branch:",
+          loading: "Laster repositories..."
+        }
+      },
       repoChecking: "Sjekker tilgang…",
       repoAccessPR: "Du publiserer til {owner} sitt repo — endringene sendes som pull request for godkjenning.",
       repoAccessDirect: "Du har skrivetilgang — endringene pushes direkte til {branch}.",

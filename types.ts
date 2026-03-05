@@ -137,7 +137,7 @@ export interface GeopackageConfig {
 
 export interface SourceConnection {
   type: SourceType;
-  config: PostgresConfig | SupabaseConfig | DatabricksConfig;
+  config: PostgresConfig | SupabaseConfig | DatabricksConfig | GeopackageConfig;
   layerMappings: Record<string, LayerSourceMapping>; // modelLayerId -> mapping
 }
 

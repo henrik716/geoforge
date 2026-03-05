@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { DataModel } from '../../types';
 import { 
   Github, Send, Check, CheckCircle2, AlertTriangle, X, HelpCircle, ExternalLink,
   History, ArrowRight, GitBranch, Terminal, ShieldAlert
 } from 'lucide-react';
 import { compareModels, generateChangelog, calculateNextVersion } from '../../utils/diffUtils';
+import GitHubAuth from '../GitHubAuth';
+import GitHubRepoBrowser from '../GitHubRepoBrowser';
 
 interface GithubTabProps {
   model: DataModel;
@@ -16,20 +18,72 @@ interface GithubTabProps {
   t: any;
 }
 
+interface OAuthState {
+  isAuthenticated: boolean;
+  user?: any;
+  token?: any;
+}
+
 const GithubTab: React.FC<GithubTabProps> = ({ 
   model, baselineModel, githubConfig, onSetBaseline, onUpdate, onUpdateGithubConfig, t 
 }) => {
+  const q = t.quickPublish || {};
+  const d = t.deploy || {};
+  const o = d.oauth || {};
   const [commitSummary, setCommitSummary] = useState('Update model: ' + model.name);
   const [pushStatus, setPushStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [suggestedVersion, setSuggestedVersion] = useState(model.version);
   const [changelog, setChangelog] = useState('');
+  const [useOAuth, setUseOAuth] = useState(true); // Default to OAuth
+  const [oauthState, setOAuthState] = useState<OAuthState>({
+    isAuthenticated: false,
+    user: null,
+    token: null
+  });
 
   const { token: githubToken, repo: githubRepo, path: githubPath, branch: githubBranch } = githubConfig;
 
   const updateConfig = (updates: any) => {
     onUpdateGithubConfig({ ...githubConfig, ...updates });
+  };
+
+  // Ref to prevent infinite loops
+  const isUpdatingConfig = useRef(false);
+
+  // Handle OAuth authentication changes
+  const handleOAuthChange = useCallback((isAuthenticated: boolean, user?: any, token?: any) => {
+    setOAuthState({ isAuthenticated, user, token });
+    
+    if (!isUpdatingConfig.current) {
+      isUpdatingConfig.current = true;
+      
+      if (isAuthenticated && token) {
+        // Auto-populate token in config
+        updateConfig({ token: token.access_token });
+      } else {
+        updateConfig({ token: '' });
+      }
+      
+      // Reset the flag after a brief delay
+      setTimeout(() => {
+        isUpdatingConfig.current = false;
+      }, 100);
+    }
+  }, []);
+
+  // Handle repository selection from browser
+  const handleRepoSelect = (repo: any, branch?: string) => {
+    updateConfig({ 
+      repo: repo.full_name,
+      branch: branch || repo.default_branch || 'main'
+    });
+  };
+
+  // Get effective token for API calls
+  const getEffectiveToken = () => {
+    return useOAuth && oauthState.token ? oauthState.token.access_token : githubToken;
   };
 
   useEffect(() => {
@@ -51,7 +105,8 @@ const GithubTab: React.FC<GithubTabProps> = ({
   };
 
   const handlePublishGithub = async () => {
-    if (!githubToken || !githubRepo || !githubPath) {
+    const token = getEffectiveToken();
+    if (!token || !githubRepo || !githubPath) {
       setPushStatus('error');
       setStatusMessage(t.github.noTokenWarn);
       return;
@@ -65,6 +120,7 @@ const GithubTab: React.FC<GithubTabProps> = ({
     setPushStatus('loading');
     setStatusMessage(t.github.connecting);
     
+    const token = getEffectiveToken();
     const cleanedRepo = cleanRepoName(githubRepo);
 
     try {
@@ -75,7 +131,7 @@ const GithubTab: React.FC<GithubTabProps> = ({
 
       const checkResponse = await fetch(
         `https://api.github.com/repos/${cleanedRepo}/contents/${githubPath}?ref=${githubBranch}`,
-        { headers: { Authorization: `token ${githubToken}` } }
+        { headers: { Authorization: `token ${token}` } }
       );
 
       if (checkResponse.ok) {
@@ -93,7 +149,7 @@ const GithubTab: React.FC<GithubTabProps> = ({
         {
           method: 'PUT',
           headers: {
-            Authorization: `token ${githubToken}`,
+            Authorization: `token ${token}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -243,26 +299,111 @@ const GithubTab: React.FC<GithubTabProps> = ({
          </div>
 
          <div className="space-y-4 md:space-y-5 pt-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">{t.github.token}</label>
-                <input type="password" value={githubToken} onChange={e => updateConfig({ token: e.target.value })} placeholder="ghp_..." className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-xs outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 font-mono" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">{t.github.repo}</label>
-                <input type="text" value={githubRepo} onChange={e => updateConfig({ repo: e.target.value })} placeholder={t.github.repoPlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-xs outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 font-bold" />
-              </div>
+            {/* OAuth Authentication - Much more prominent */}
+            <div className="space-y-4">
+              {!useOAuth ? (
+                <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-200 rounded-2xl">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
+                        <Github size={20} className="text-indigo-600" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-indigo-900">{o.recommended}</h4>
+                        <p className="text-sm text-indigo-600">{o.recommendedDesc}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setUseOAuth(true)}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium text-sm transition-all active:scale-95 shadow-sm"
+                    >
+                      {o.enableButton}
+                    </button>
+                  </div>
+                  <div className="text-xs text-indigo-500 space-y-1">
+                    <p>✓ {o.benefits.noTokens}</p>
+                    <p>✓ {o.benefits.autoManagement}</p>
+                    <p>✓ {o.benefits.visualBrowse}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <GitHubAuth 
+                    onAuthChange={handleOAuthChange}
+                    compact={true}
+                    t={t}
+                  />
+
+                  {/* Repository Browser for OAuth */}
+                  {oauthState.isAuthenticated && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <Github size={16} />
+                        <span className="font-medium">{o.selectRepository}</span>
+                      </div>
+                      <GitHubRepoBrowser
+                        onRepoSelect={handleRepoSelect}
+                        selectedRepo={githubRepo}
+                        selectedBranch={githubBranch}
+                        showBranchSelection={true}
+                        compact={true}
+                        t={t}
+                      />
+                    </div>
+                  )}
+
+                  {/* Fallback to manual input */}
+                  {!oauthState.isAuthenticated && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                      <div className="flex items-center gap-2 text-amber-700">
+                        <AlertTriangle size={16} />
+                        <span className="text-sm font-medium">{o.connectToBrowse}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Switch back option */}
+                  <button
+                    onClick={() => setUseOAuth(false)}
+                    className="text-xs text-slate-500 hover:text-slate-700 transition-colors"
+                  >
+                    {o.switchToManual}
+                  </button>
+                </div>
+              )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">{t.github.path}</label>
-                <input type="text" value={githubPath} onChange={e => updateConfig({ path: e.target.value })} placeholder={t.github.pathPlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-xs outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 font-mono" />
+            {/* Manual Token Input (when OAuth is disabled) */}
+            {!useOAuth && (
+              <div className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <ShieldAlert size={16} />
+                  <span className="font-medium">{o.manualConfig}</span>
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">{t.github.token}</label>
+                    <input type="password" value={githubToken} onChange={e => updateConfig({ token: e.target.value })} placeholder="ghp_..." className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3.5 text-xs outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 font-mono" />
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">{t.github.repo}</label>
+                      <input type="text" value={githubRepo} onChange={e => updateConfig({ repo: e.target.value })} placeholder={t.github.repoPlaceholder} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3.5 text-xs outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 font-bold" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">{t.github.branch || "Branch"}</label>
+                      <input type="text" value={githubBranch} onChange={e => updateConfig({ branch: e.target.value })} placeholder="main" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3.5 text-xs outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 font-bold" />
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">{t.github.branch || "Branch"}</label>
-                <input type="text" value={githubBranch} onChange={e => updateConfig({ branch: e.target.value })} placeholder="main" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-xs outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 font-bold" />
-              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">{t.github.path}</label>
+              <input type="text" value={githubPath} onChange={e => updateConfig({ path: e.target.value })} placeholder={t.github.pathPlaceholder} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-xs outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 font-mono" />
             </div>
 
             <div className="space-y-1.5">
