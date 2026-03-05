@@ -39,6 +39,12 @@ export const no = {
         "Når endringene er merget, bygges og deployes tjenesten automatisk via GitHub Actions.",
         "Du trenger et Personal Access Token (PAT) fra din egen GitHub-bruker. Hvis du skal levere til andre sitt repo, må de først gi din bruker skrivetilgang (collaborator). Opprett PAT under github.com → Settings → Developer settings."
       ],
+      publishGuideStepsOAuth: [
+        "Filene pushes til et GitHub-repo som du velger nedenfor.",
+        "Hvis du publiserer til et repo som tilhører en annen (f.eks. Kartverket), opprettes det automatisk en pull request som må godkjennes før noe skjer.",
+        "Når endringene er merget, bygges og deployes tjenesten automatisk via GitHub Actions.",
+        "Koble til din GitHub-konto for sikker autentisering. OAuth håndterer tokens automatisk - ingen manuell oppsett kreves."
+      ],
       next: "Neste",
       back: "Tilbake",
       skipToPublish: "Hopp til publisering",

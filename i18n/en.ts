@@ -39,6 +39,12 @@ export const en = {
         "Once the changes are merged, the service is built and deployed automatically via GitHub Actions.",
         "You need a Personal Access Token (PAT) from your own GitHub account. If publishing to someone else's repo, they must first grant your user write access (collaborator). Create your PAT at github.com → Settings → Developer settings."
       ],
+      publishGuideStepsOAuth: [
+        "Your files are pushed to a GitHub repository that you choose below.",
+        "If you're publishing to someone else's repo (e.g. The Norwegian Mapping Authority), a pull request is created automatically and must be approved before anything happens.",
+        "Once the changes are merged, the service is built and deployed automatically via GitHub Actions.",
+        "Connect your GitHub account to authenticate securely. OAuth handles token management automatically - no manual setup required."
+      ],
       next: "Next",
       back: "Back",
       skipToPublish: "Skip to publish",

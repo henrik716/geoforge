@@ -287,6 +287,7 @@ const GithubTab: React.FC<GithubTabProps> = ({
          </div>
          <p className="text-xs text-slate-500 leading-relaxed font-medium">{t.github.persistenceDesc}</p>
          
+         {!useOAuth && (
          <div className="bg-indigo-50 rounded-2xl md:rounded-3xl p-4 md:p-5 border border-indigo-100 space-y-2 md:space-y-3">
             <div className="flex items-center gap-2 md:gap-3 text-indigo-700">
               <HelpCircle size={18} />
@@ -297,6 +298,7 @@ const GithubTab: React.FC<GithubTabProps> = ({
               GitHub Settings <ExternalLink size={12} />
             </a>
          </div>
+         )}
 
          <div className="space-y-4 md:space-y-5 pt-2">
             {/* OAuth Authentication - Much more prominent */}
