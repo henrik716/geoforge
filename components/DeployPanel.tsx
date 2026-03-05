@@ -15,6 +15,8 @@ import ImportWarnings from './ImportWarnings';
 import SourceTypePicker, { SOURCE_META } from './deploy/SourceTypePicker';
 import ConnectionForm from './deploy/ConnectionForm';
 import LayerMappingCard from './deploy/LayerMappingCard';
+import GitHubAuth from './GitHubAuth';
+import GitHubRepoBrowser from './GitHubRepoBrowser';
 
 interface DeployPanelProps {
   model: DataModel;
@@ -68,6 +70,9 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
   const [ghBranch, setGhBranch] = useState(model.githubMeta?.branch || 'main');
   const [ghToken, setGhToken] = useState('');
   const [ghBasePath, setGhBasePath] = useState('');
+  const [useOAuth, setUseOAuth] = useState(true); // Default to OAuth
+  const [oauthUser, setOAuthUser] = useState<any>(null);
+  const [oauthToken, setOAuthToken] = useState<any>(null);
   const [deployTarget, setDeployTarget] = useState<DeployTarget>('docker-compose');
   const [repoAccess, setRepoAccess] = useState<{ isOwner: boolean; ownerLogin: string; userLogin: string } | null>(null);
   const [repoCheckStatus, setRepoCheckStatus] = useState<'idle' | 'checking' | 'done' | 'error'>('idle');
@@ -76,16 +81,43 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
 
   // Auto-detect repo ownership when repo + token are filled
   const checkAccess = async () => {
-    if (!ghRepo || !ghToken) { setRepoAccess(null); setRepoCheckStatus('idle'); return; }
+    const token = useOAuth ? oauthToken?.access_token : ghToken;
+    if (!ghRepo || !token) { setRepoAccess(null); setRepoCheckStatus('idle'); return; }
     setRepoCheckStatus('checking');
     try {
-      const access = await checkRepoAccess(ghToken, ghRepo);
+      const access = await checkRepoAccess(token, ghRepo);
       setRepoAccess(access);
       setRepoCheckStatus('done');
     } catch {
       setRepoAccess(null);
       setRepoCheckStatus('error');
     }
+  };
+
+  // Handle OAuth authentication changes
+  const handleOAuthChange = (isAuthenticated: boolean, user?: any, token?: any) => {
+    if (isAuthenticated && user && token) {
+      setOAuthUser(user);
+      setOAuthToken(token);
+    } else {
+      setOAuthUser(null);
+      setOAuthToken(null);
+    }
+  };
+
+  // Handle repository selection from browser
+  const handleRepoSelect = (repo: any, branch?: string) => {
+    setGhRepo(repo.full_name);
+    if (branch) {
+      setGhBranch(branch);
+    } else {
+      setGhBranch(repo.default_branch);
+    }
+  };
+
+  // Get effective token for API calls
+  const getEffectiveToken = () => {
+    return useOAuth ? oauthToken?.access_token : ghToken;
   };
 
   const willCreatePR = repoAccess !== null && !repoAccess.isOwner;
@@ -154,7 +186,8 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
   };
 
   const isPublishReady = (): boolean => {
-    return !!(ghRepo && ghToken);
+    const token = useOAuth ? oauthToken : ghToken;
+    return !!(ghRepo && token);
   };
 
   const handlePublish = async () => {
@@ -170,7 +203,7 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
         includeData && localDataFile ? { [`data/${localDataFile.filename}`]: localDataFile.blob } : undefined;
       
       const result = await pushDeployKit(
-        ghToken, ghRepo, ghBranch, ghBasePath, files, commitMsg,
+        getEffectiveToken()!, ghRepo, ghBranch, ghBasePath, files, commitMsg,
         willCreatePR, `Deploy: ${model.name} v${model.version}`, binaryFiles
       );
       setPublishResult(result);
@@ -378,22 +411,62 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
                 />
                 <p className="text-[10px] text-slate-600 font-medium px-1">{d.githubRepoHint}</p>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">{d.githubToken}</label>
-                <div className="relative">
-                  <input
-                    type="password"
-                    value={ghToken}
-                    onChange={e => setGhToken(e.target.value)}
-                    onBlur={checkAccess}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-5 py-4 text-xs font-bold text-slate-200 outline-none focus:ring-4 focus:ring-violet-500/20 focus:border-violet-500 transition-all placeholder:text-slate-600"
-                    placeholder="ghp_..."
-                  />
+              {/* GitHub Authentication */}
+              <div className="space-y-6 md:col-span-2">
+                {/* Auth Method Toggle */}
+                <div className="flex items-center gap-4 p-4 bg-slate-800/60 rounded-2xl border border-slate-700">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useOAuth}
+                      onChange={(e) => setUseOAuth(e.target.checked)}
+                      className="w-5 h-5 rounded-lg border-2 border-slate-600 text-violet-500 focus:ring-violet-500 bg-slate-900"
+                    />
+                    <span className="text-sm font-medium text-white">Use OAuth Authentication</span>
+                  </label>
+                  <div className="flex-1 text-right">
+                    <p className="text-xs text-slate-400">
+                      {useOAuth ? 'Recommended - More secure' : 'Manual token input'}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-[10px] text-slate-600 font-medium px-1">{d.githubTokenHint}</p>
+
+                {useOAuth ? (
+                  <GitHubAuth 
+                    onAuthChange={handleOAuthChange}
+                    compact={false}
+                  />
+                ) : (
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">{d.githubToken}</label>
+                    <div className="relative">
+                      <input
+                        type="password"
+                        value={ghToken}
+                        onChange={e => setGhToken(e.target.value)}
+                        onBlur={checkAccess}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-5 py-4 text-xs font-bold text-slate-200 outline-none focus:ring-4 focus:ring-violet-500/20 focus:border-violet-500 transition-all placeholder:text-slate-600"
+                        placeholder="ghp_..."
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-600 font-medium px-1">{d.githubTokenHint}</p>
+                  </div>
+                )}
+
+                {/* Repository Browser for OAuth */}
+                {useOAuth && oauthToken && (
+                  <GitHubRepoBrowser
+                    onRepoSelect={handleRepoSelect}
+                    selectedRepo={ghRepo}
+                    selectedBranch={ghBranch}
+                    showBranchSelection={true}
+                    compact={false}
+                  />
+                )}
               </div>
             </div>
 
+            {/* Branch and Base Path */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-1.5">
                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">{d.githubBranch}</label>

@@ -14,8 +14,5 @@ COPY . .
 # Build the application
 RUN npm run build
 
-# Install serve globally
-RUN npm install -g serve
-
-# Start the application (serve automatically binds to Railway's $PORT)
-CMD ["serve", "-s", "dist"]
+# Start the application
+CMD ["node", "server.js"]

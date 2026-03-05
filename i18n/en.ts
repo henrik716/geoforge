@@ -282,6 +282,41 @@ export const en = {
       githubBasePath: "Path in repo",
       githubBasePathPlaceholder: "services/my-dataset",
       githubBasePathHint: "Optional subdirectory. Empty = repo root.",
+      // OAuth Authentication
+      oauth: {
+        title: "GitHub OAuth",
+        recommended: "Use GitHub OAuth (Recommended)",
+        recommendedDesc: "More secure and easier than tokens",
+        enableButton: "Enable OAuth",
+        enabled: "OAuth Authentication Enabled",
+        connectToBrowse: "Connect GitHub to browse repositories",
+        selectRepository: "Select Repository to Publish",
+        switchToManual: "← Switch to manual token input",
+        manualConfig: "Manual Token Configuration",
+        benefits: {
+          noTokens: "No need to create personal access tokens",
+          autoManagement: "Automatic token management and refresh",
+          visualBrowse: "Browse and select repositories visually"
+        },
+        auth: {
+          connectGitHub: "Connect GitHub",
+          connectAccount: "Connect GitHub Account",
+          connected: "Connected to GitHub",
+          disconnect: "Disconnect GitHub",
+          notConfigured: "OAuth Not Configured",
+          notConfiguredDesc: "Set VITE_GITHUB_CLIENT_ID and VITE_GITHUB_CLIENT_SECRET environment variables to enable OAuth authentication.",
+          welcomeConnected: "Great! You're connected to GitHub",
+          loadingRepos: "Loading your repositories...",
+          connectToBrowseRepos: "Connect your GitHub account to browse repositories"
+        },
+        repoBrowser: {
+          chooseRepository: "Choose a repository:",
+          selectedRepository: "Selected Repository:",
+          searchPlaceholder: "Search repositories...",
+          branch: "Branch:",
+          loading: "Loading repositories..."
+        }
+      },
       repoChecking: "Checking access…",
       repoAccessPR: "Publishing to {owner}'s repo — changes will be submitted as a pull request for review.",
       repoAccessDirect: "You have push access — changes will be pushed directly to {branch}.",

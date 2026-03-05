@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   Check, Github, Layers, RefreshCw, ExternalLink, Info,
-  GitPullRequest, Download, Cloud, Server, Package, AlertTriangle
+  GitPullRequest, Download, Cloud, Server, Package, AlertTriangle, ShieldAlert
 } from 'lucide-react';
 import { DataModel, ModelMetadata, DeployTarget } from '../../types';
 import { InferredDataSummary } from '../../utils/importUtils';
 import { generateDeployFiles, exportDeployKit } from '../../utils/deployUtils';
 import { pushDeployKit, checkRepoAccess, DeployPushResult } from '../../utils/githubService';
+import GitHubAuth from '../GitHubAuth';
+import GitHubRepoBrowser from '../GitHubRepoBrowser';
 
 interface PublishStepProps {
   model: DataModel;
@@ -18,9 +20,16 @@ interface PublishStepProps {
   onBack?: () => void;
 }
 
+interface OAuthState {
+  isAuthenticated: boolean;
+  user?: any;
+  token?: any;
+}
+
 const PublishStep: React.FC<PublishStepProps> = ({ model, summary, selectedLayers, dataBlob, lang, t, onBack }) => {
   const q = t.quickPublish || {};
   const d = t.deploy || {};
+  const o = d.oauth || {};
 
   const meta: ModelMetadata = model.metadata || {} as ModelMetadata;
 
@@ -31,6 +40,12 @@ const PublishStep: React.FC<PublishStepProps> = ({ model, summary, selectedLayer
   const [ghToken, setGhToken] = useState('');
   const [ghBasePath, setGhBasePath] = useState('');
   const [includeData, setIncludeData] = useState(false);
+  const [useOAuth, setUseOAuth] = useState(true); // Default to OAuth
+  const [oauthState, setOAuthState] = useState<OAuthState>({
+    isAuthenticated: false,
+    user: null,
+    token: null
+  });
   const [repoAccess, setRepoAccess] = useState<{ isOwner: boolean; ownerLogin: string } | null>(null);
   const [repoCheckStatus, setRepoCheckStatus] = useState<'idle' | 'checking' | 'done' | 'error'>('idle');
   const [publishStatus, setPublishStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -45,16 +60,54 @@ const PublishStep: React.FC<PublishStepProps> = ({ model, summary, selectedLayer
   };
 
   const checkAccess = async () => {
-    if (!ghRepo || !ghToken) { setRepoAccess(null); setRepoCheckStatus('idle'); return; }
+    const token = useOAuth && oauthState.token ? oauthState.token.access_token : ghToken;
+    if (!ghRepo || !token) { setRepoAccess(null); setRepoCheckStatus('idle'); return; }
     setRepoCheckStatus('checking');
     try {
-      const access = await checkRepoAccess(ghToken, ghRepo);
+      const access = await checkRepoAccess(token, ghRepo);
       setRepoAccess(access);
       setRepoCheckStatus('done');
     } catch {
       setRepoAccess(null);
       setRepoCheckStatus('error');
     }
+  };
+
+  // Handle OAuth authentication changes
+  const isUpdatingToken = useRef(false);
+  
+  const handleOAuthChange = useCallback((isAuthenticated: boolean, user?: any, token?: any) => {
+    setOAuthState({ isAuthenticated, user, token });
+    
+    if (!isUpdatingToken.current) {
+      isUpdatingToken.current = true;
+      
+      if (isAuthenticated && token) {
+        setGhToken(token.access_token);
+      } else {
+        setGhToken('');
+      }
+      
+      // Reset the flag after a brief delay
+      setTimeout(() => {
+        isUpdatingToken.current = false;
+      }, 100);
+    }
+  }, []);
+
+  // Handle repository selection from browser
+  const handleRepoSelect = (repo: any, branch?: string) => {
+    setGhRepo(repo.full_name);
+    if (branch) {
+      setGhBranch(branch);
+    } else {
+      setGhBranch(repo.default_branch || 'main');
+    }
+  };
+
+  // Get effective token for API calls
+  const getEffectiveToken = () => {
+    return useOAuth && oauthState.token ? oauthState.token.access_token : ghToken;
   };
 
   const buildPublishModel = (baseModel: DataModel, selectedIds: Set<string>): DataModel => {
@@ -106,7 +159,7 @@ const PublishStep: React.FC<PublishStepProps> = ({ model, summary, selectedLayer
         includeData && dataBlob ? { [`data/${dataBlob.filename}`]: dataBlob.blob } : undefined;
 
       const result = await pushDeployKit(
-        ghToken, ghRepo, ghBranch, ghBasePath, files, commitMsg,
+        getEffectiveToken()!, ghRepo, ghBranch, ghBasePath, files, commitMsg,
         willCreatePR, `Publish: ${publishModel.name}`, binaryFiles
       );
       setPublishResult(result);
@@ -213,22 +266,109 @@ const PublishStep: React.FC<PublishStepProps> = ({ model, summary, selectedLayer
       </div>
 
       {/* GitHub config */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{d.githubRepo}</label>
-          <input value={ghRepo} onChange={e => setGhRepo(e.target.value)} onBlur={checkAccess} placeholder={d.githubRepoPlaceholder} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{d.githubToken}</label>
-          <input type="password" value={ghToken} onChange={e => setGhToken(e.target.value)} onBlur={checkAccess} placeholder="ghp_..." className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" />
-        </div>
-      </div>
+      <div className="space-y-4">
+        {/* OAuth Authentication - Much more prominent */}
+        <div className="space-y-4">
+          {!useOAuth ? (
+            <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-200 rounded-2xl">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
+                    <Github size={20} className="text-indigo-600" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-indigo-900">{o.recommended}</h4>
+                    <p className="text-sm text-indigo-600">{o.recommendedDesc}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setUseOAuth(true)}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium text-sm transition-all active:scale-95 shadow-sm"
+                >
+                  {o.enableButton}
+                </button>
+              </div>
+              <div className="text-xs text-indigo-500 space-y-1">
+                <p>✓ {o.benefits.noTokens}</p>
+                <p>✓ {o.benefits.autoManagement}</p>
+                <p>✓ {o.benefits.visualBrowse}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <GitHubAuth 
+                onAuthChange={handleOAuthChange}
+                compact={true}
+                t={t}
+              />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{d.githubBranch}</label>
-          <input value={ghBranch} onChange={e => setGhBranch(e.target.value)} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" />
+              {/* Repository Browser for OAuth */}
+              {oauthState.isAuthenticated && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <Github size={16} />
+                    <span className="font-medium">{o.selectRepository}</span>
+                  </div>
+                  <GitHubRepoBrowser
+                    onRepoSelect={handleRepoSelect}
+                    selectedRepo={ghRepo}
+                    selectedBranch={ghBranch}
+                    showBranchSelection={true}
+                    compact={true}
+                    t={t}
+                  />
+                </div>
+              )}
+
+              {/* Fallback to manual input */}
+              {!oauthState.isAuthenticated && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                  <div className="flex items-center gap-2 text-amber-700">
+                    <AlertTriangle size={16} />
+                    <span className="text-sm font-medium">{o.connectToBrowse}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Switch back option */}
+              <button
+                onClick={() => setUseOAuth(false)}
+                className="text-xs text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                ← {o.switchToManual}
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Manual Token Input (when OAuth is disabled) */}
+        {!useOAuth && (
+          <div className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <ShieldAlert size={16} />
+              <span className="font-medium">{o.manualConfig}</span>
+            </div>
+            
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{d.githubToken}</label>
+                <input type="password" value={ghToken} onChange={e => setGhToken(e.target.value)} onBlur={checkAccess} placeholder="ghp_..." className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" />
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{d.githubRepo}</label>
+                  <input value={ghRepo} onChange={e => setGhRepo(e.target.value)} onBlur={checkAccess} placeholder={d.githubRepoPlaceholder} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{d.githubBranch}</label>
+                  <input value={ghBranch} onChange={e => setGhBranch(e.target.value)} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">{d.githubBasePath}</label>
           <input value={ghBasePath} onChange={e => setGhBasePath(e.target.value)} placeholder={d.githubBasePathPlaceholder} className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" />
@@ -329,7 +469,7 @@ const PublishStep: React.FC<PublishStepProps> = ({ model, summary, selectedLayer
           </button>
           <button
             onClick={handlePublish}
-            disabled={!ghRepo || !ghToken || publishStatus === 'loading'}
+            disabled={!ghRepo || !getEffectiveToken() || publishStatus === 'loading'}
             className="px-8 py-3.5 rounded-2xl bg-emerald-600 text-white font-black text-xs uppercase tracking-[0.15em] hover:bg-emerald-500 active:scale-95 transition-all shadow-lg shadow-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {publishStatus === 'loading' ? (
