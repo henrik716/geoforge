@@ -194,7 +194,7 @@ const PublishStep: React.FC<PublishStepProps> = ({ model, summary, selectedLayer
       <div className="p-6 bg-indigo-50/70 border border-indigo-100 rounded-2xl space-y-4">
         <h3 className="text-xs font-black uppercase tracking-widest text-indigo-500">{q.publishGuideTitle}</h3>
         <ol className="space-y-3">
-          {(q.publishGuideSteps || []).map((text: string, i: number) => (
+          {(useOAuth ? (q.publishGuideStepsOAuth || q.publishGuideSteps) : (q.publishGuideSteps || [])).map((text: string, i: number) => (
             <li key={i} className="flex gap-3 text-sm text-slate-600 font-medium leading-relaxed">
               <span className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-black shrink-0 mt-0.5">{i + 1}</span>
               <span>{text}</span>
