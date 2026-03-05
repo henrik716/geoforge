@@ -43,7 +43,7 @@ async function handleGitHubOAuth(req, res) {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
       body: new URLSearchParams({
-        client_id: process.env.GITHUB_CLIENT_ID,
+        client_id: process.env.GITHUB_CLIENT_ID || process.env.VITE_GITHUB_CLIENT_ID,
         client_secret: process.env.GITHUB_CLIENT_SECRET,
         code,
         code_verifier,
