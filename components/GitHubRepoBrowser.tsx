@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Github, Search, Filter, ChevronDown, ChevronRight, 
+import {
+  Github, Search, Filter, ChevronDown, ChevronRight,
   GitBranch, Users, Lock, Globe, Check, AlertCircle, Loader2,
   RefreshCw
 } from 'lucide-react';
@@ -61,10 +61,10 @@ const GitHubRepoBrowser: React.FC<GitHubRepoBrowserProps> = ({
     if (repos.length > 0 && !selectedRepo && onRepoSelect) {
       // Smart selection: prefer user's own repos, then by recent activity
       const ownerRepos = repos.filter(repo => repo.owner.login === user?.login);
-      const sortedRepos = ownerRepos.length > 0 
+      const sortedRepos = ownerRepos.length > 0
         ? ownerRepos.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
         : repos.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-      
+
       const firstRepo = sortedRepos[0];
       onRepoSelect(firstRepo);
       // Auto-expand the selected repository
@@ -99,7 +99,7 @@ const GitHubRepoBrowser: React.FC<GitHubRepoBrowserProps> = ({
 
     setLoadingRepos(true);
     setRepoError(null);
-    
+
     try {
       const userRepos = await getUserRepos();
       setRepos(userRepos);
@@ -114,7 +114,7 @@ const GitHubRepoBrowser: React.FC<GitHubRepoBrowserProps> = ({
     if (!token) return;
 
     setLoadingBranches(prev => new Set(prev).add(repo.full_name));
-    
+
     try {
       const repoBranches = await getRepoBranches(repo.owner.login, repo.name);
       setBranches(prev => ({
@@ -201,13 +201,6 @@ const GitHubRepoBrowser: React.FC<GitHubRepoBrowserProps> = ({
         {/* Repository selection when loaded */}
         {repos.length > 0 && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm text-slate-700">
-              <Github size={16} />
-              <span className="font-medium">
-                {selectedRepo ? repoTexts.selectedRepository : repoTexts.chooseRepository}
-              </span>
-            </div>
-            
             {/* Search */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
@@ -226,11 +219,10 @@ const GitHubRepoBrowser: React.FC<GitHubRepoBrowserProps> = ({
                 <div
                   key={repo.id}
                   onClick={() => handleRepoSelect(repo)}
-                  className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                    selectedRepo === repo.full_name
+                  className={`p-3 rounded-lg border cursor-pointer transition-all ${selectedRepo === repo.full_name
                       ? 'bg-indigo-50 border-indigo-200'
                       : 'bg-white border-slate-200 hover:bg-slate-50'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-3">
                     {getRepoIcon(repo)}
@@ -308,7 +300,7 @@ const GitHubRepoBrowser: React.FC<GitHubRepoBrowserProps> = ({
               className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
-          
+
           <div className="relative">
             <select
               value={filterType}
@@ -364,15 +356,14 @@ const GitHubRepoBrowser: React.FC<GitHubRepoBrowserProps> = ({
                         <p className="text-sm text-slate-600">{repo.full_name}</p>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-2">
                       {getPermissionBadge(repo)}
                       {showBranchSelection && (
                         <ChevronRight
                           size={16}
-                          className={`text-slate-400 transform transition-transform ${
-                            expandedRepos.has(repo.full_name) ? 'rotate-90' : ''
-                          }`}
+                          className={`text-slate-400 transform transition-transform ${expandedRepos.has(repo.full_name) ? 'rotate-90' : ''
+                            }`}
                         />
                       )}
                     </div>
@@ -389,18 +380,17 @@ const GitHubRepoBrowser: React.FC<GitHubRepoBrowserProps> = ({
                         <Loader2 size={14} className="animate-spin text-slate-400" />
                       )}
                     </div>
-                    
+
                     {branches[repo.full_name] ? (
                       <div className="space-y-1">
                         {branches[repo.full_name].map(branch => (
                           <button
                             key={branch}
                             onClick={() => handleRepoSelect(repo, branch)}
-                            className={`w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-100 ${
-                              selectedRepo === repo.full_name && selectedBranch === branch
+                            className={`w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-100 ${selectedRepo === repo.full_name && selectedBranch === branch
                                 ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
                                 : 'text-slate-700'
-                            }`}
+                              }`}
                           >
                             <div className="flex items-center justify-between">
                               <span>{branch}</span>
