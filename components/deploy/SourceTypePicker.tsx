@@ -41,23 +41,22 @@ const SourceTypePicker: React.FC<SourceTypePickerProps> = ({ sourceType, onSelec
           <p className="text-xs text-slate-500 font-medium">{d.subtitle}</p>
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
         {sourceTypes.map(type => {
           const meta = SOURCE_META[type];
           return (
             <button
               key={type}
               onClick={() => { onSelect(type); }}
-              className={`text-left p-6 rounded-[24px] border-2 transition-all flex flex-col items-start gap-4 active:scale-95 group hover:scale-[1.02] ${
-                sourceType === type ? 'border-violet-400 bg-violet-50 shadow-xl' : 'border-slate-100 bg-white shadow-sm'
-              }`}
+              className={`w-full overflow-hidden text-left p-5 sm:p-6 rounded-[24px] border-2 transition-all flex flex-col gap-4 active:scale-95 group hover:scale-[1.02] ${sourceType === type ? 'border-violet-400 bg-violet-50 shadow-xl' : 'border-slate-100 bg-white shadow-sm'
+                }`}
             >
               <div className={`w-12 h-12 rounded-xl flex items-center justify-center border shrink-0 transition-transform group-hover:rotate-3 ${meta.colorClass}`}>
                 {meta.icon}
               </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-[10px] font-black text-slate-800 uppercase tracking-widest mb-1 truncate">{d.sources[type] || type}</h3>
-                <p className="text-[10px] text-slate-500 font-medium leading-tight line-clamp-2">{d.sources[`${type}Desc`] || `Connect to ${type}`}</p>
+              <div className="min-w-0 w-full">
+                <h3 className="text-[10px] sm:text-xs font-black text-slate-800 uppercase tracking-widest mb-1">{d.sources[type] || type}</h3>
+                <p className="text-[10px] text-slate-500 font-medium leading-tight">{d.sources[`${type}Desc`] || `Connect to ${type}`}</p>
               </div>
             </button>
           );
