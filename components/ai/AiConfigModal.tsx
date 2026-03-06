@@ -77,10 +77,11 @@ const AiConfigModal: React.FC<AiConfigModalProps> = ({
     setSaveError('');
 
     try {
+      setProvider(provider);
       saveApiKey(keyDraft, provider);
       setHasKey(true);
       setShowSuccess(true);
-      
+
       setTimeout(() => {
         setShowSuccess(false);
         onSuccess?.();
@@ -106,7 +107,7 @@ const AiConfigModal: React.FC<AiConfigModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/20 backdrop-blur-sm">
-      <div 
+      <div
         ref={modalRef}
         className="bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 w-full max-w-md animate-in zoom-in-95 duration-150"
       >
@@ -145,15 +146,14 @@ const AiConfigModal: React.FC<AiConfigModalProps> = ({
                 <button
                   key={p}
                   onClick={() => handleProviderChange(p)}
-                  className={`p-3 rounded-xl border-2 transition-all ${
-                    provider === p
+                  className={`p-3 rounded-xl border-2 transition-all ${provider === p
                       ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
                       : 'border-slate-200 hover:border-slate-300 text-slate-600'
-                  }`}
+                    }`}
                 >
                   <div className="text-sm font-bold">{help.name}</div>
                   <div className="text-xs opacity-75 mt-1">
-                    {p === 'claude' 
+                    {p === 'claude'
                       ? (t.ai?.claudeDescription || 'Fast, reliable AI with excellent text generation')
                       : (t.ai?.geminiDescription || 'Google\'s AI model with strong reasoning capabilities')
                     }
@@ -208,7 +208,7 @@ const AiConfigModal: React.FC<AiConfigModalProps> = ({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-indigo-500 mb-3 transition-colors"
                 autoFocus
               />
-              
+
               {saveError && (
                 <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 rounded-lg mb-3">
                   <AlertCircle size={14} className="text-rose-600" />
@@ -227,7 +227,7 @@ const AiConfigModal: React.FC<AiConfigModalProps> = ({
           >
             {t.ai?.cancel || 'Cancel'}
           </button>
-          
+
           {!hasKey && (
             <button
               onClick={handleSave}

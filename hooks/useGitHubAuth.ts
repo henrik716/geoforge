@@ -3,6 +3,8 @@ import {
   getToken,
   clearToken,
   getUser,
+  storeUser,
+  getGitHubUser,
   initiateOAuth,
   getUserRepositories,
   getRepositoryBranches,
@@ -31,45 +33,43 @@ export interface GitHubAuthActions {
 }
 
 export const useGitHubAuth = (): GitHubAuthState & GitHubAuthActions => {
-  const [state, setState] = useState<GitHubAuthState>({
-    isAuthenticated: false,
-    user: null,
-    token: null,
-    isLoading: false,
-    error: null,
-    isConfigured: false
+  // Initialize synchronously from localStorage so every instance (including nested
+  // ones like GitHubRepoBrowser) starts with the correct auth state on first render,
+  // avoiding any flash of the "not authenticated" UI after a full-page redirect.
+  const [state, setState] = useState<GitHubAuthState>(() => {
+    const token = getToken();
+    const user = getUser();
+    return {
+      isAuthenticated: !!token,
+      user,
+      token,
+      isLoading: false,
+      error: null,
+      isConfigured: isOAuthConfigured(),
+    };
   });
 
-  // Initialize auth state on mount
+  // If we have a token but no user data (e.g. the /user fetch failed in the
+  // callback page), fetch it now so the UI can display the user's name/avatar.
   useEffect(() => {
-    const initializeAuth = async () => {
-      setState(prev => ({ ...prev, isLoading: true }));
-      
-      try {
-        const configured = isOAuthConfigured();
-        const token = getToken();
-        const user = getUser();
-        
-        setState(prev => ({
-          ...prev,
-          isConfigured: configured,
-          isAuthenticated: !!(token && user),
-          token,
-          user,
-          isLoading: false
-        }));
-
-      } catch (error) {
-        setState(prev => ({
-          ...prev,
-          error: error instanceof Error ? error.message : 'Failed to initialize auth',
-          isLoading: false
-        }));
-      }
-    };
-
-    initializeAuth();
-  }, []);
+    if (state.isAuthenticated && state.token && !state.user) {
+      getGitHubUser(state.token.access_token)
+        .then(user => {
+          storeUser(user);
+          setState(prev => ({ ...prev, user }));
+        })
+        .catch(() => {
+          // Token is probably invalid — clear everything
+          clearToken();
+          setState(prev => ({
+            ...prev,
+            isAuthenticated: false,
+            token: null,
+            user: null,
+          }));
+        });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listen for OAuth completion via storage events.
   // The oauth-callback.html page writes the token to localStorage after exchanging

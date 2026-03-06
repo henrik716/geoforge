@@ -50,7 +50,19 @@ const App: React.FC = () => {
   const { pushToHistory, undo, redo, historyIndex, historyLength } = useHistory(models);
 
   const [selectedId, setSelectedId] = useState<string | null>(models[0]?.id || null);
-  const [activeTab, setActiveTab] = useState<ViewTab>('landing');
+  const [activeTab, setActiveTab] = useState<ViewTab>(() => {
+    // After a full-page OAuth redirect the page reloads from scratch.
+    // Detect this and send the user straight to the editor instead of the
+    // landing page so they can continue where they left off.
+    const oauthPending = localStorage.getItem('github_oauth_redirect_pending');
+    if (oauthPending) {
+      localStorage.removeItem('github_oauth_redirect_pending');
+      if (localStorage.getItem('github_oauth_token') && models.length > 0) {
+        return 'editor';
+      }
+    }
+    return 'landing';
+  });
   const [dirty, setDirty] = useState(false);
   const [quickPublishSummary, setQuickPublishSummary] = useState<InferredDataSummary | null>(null);
   const [quickPublishValidation, setQuickPublishValidation] = useState<ImportValidationResult | null>(null);

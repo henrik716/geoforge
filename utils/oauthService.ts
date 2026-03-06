@@ -158,7 +158,9 @@ export const initiateOAuth = async (): Promise<void> => {
     // Navigate the already-open tab to GitHub
     authWindow.location.href = authUrl;
   } else {
-    // Tab was blocked entirely — last-resort full-page redirect
+    // Tab was blocked entirely — last-resort full-page redirect.
+    // Save a flag so the app can restore the user's view after returning.
+    localStorage.setItem('github_oauth_redirect_pending', 'true');
     window.location.href = authUrl;
     return new Promise(() => {}); // never resolves; page navigates away
   }
