@@ -12,6 +12,8 @@ export interface AiConstraintSuggestion {
 
 const PROVIDER_KEY = 'geoforge-ai-provider';
 const API_KEY_PREFIX = 'geoforge-ai-key-';
+const TRIAL_USES_KEY = 'geoforge-ai-trial-uses';
+export const MAX_TRIAL_USES = 10;
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 const GEMINI_MODEL = 'gemini-2.5-flash';
 const CLAUDE_ENDPOINT = 'https://api.anthropic.com/v1/messages';
@@ -48,7 +50,23 @@ export class AiNetworkError extends Error {
 }
 
 export function getProvider(): AiProvider {
-  return (localStorage.getItem(PROVIDER_KEY) as AiProvider) ?? 'claude';
+  const saved = localStorage.getItem(PROVIDER_KEY);
+  if (saved === 'claude' || saved === 'gemini') return saved;
+  const hasUserKey = !!localStorage.getItem(API_KEY_PREFIX + 'claude') || !!localStorage.getItem(API_KEY_PREFIX + 'gemini');
+
+  if (!hasUserKey && import.meta.env.VITE_DEFAULT_AI_KEY && getTrialUsesLeft() > 0) {
+    const defaultProvider = import.meta.env.VITE_DEFAULT_AI_PROVIDER;
+    if (defaultProvider === 'claude' || defaultProvider === 'gemini') {
+      return defaultProvider;
+    }
+    if (import.meta.env.VITE_DEFAULT_AI_KEY.startsWith('sk-ant-')) {
+      return 'claude';
+    } else {
+      return 'gemini';
+    }
+  }
+
+  return 'claude';
 }
 
 export function setProvider(p: AiProvider): void {
@@ -60,29 +78,60 @@ export function getApiKey(p?: AiProvider): string | null {
 }
 
 export function hasApiKey(p?: AiProvider): boolean {
-  return !!getApiKey(p);
+  if (getApiKey(p)) return true;
+  if (import.meta.env.VITE_DEFAULT_AI_KEY && getTrialUsesLeft() > 0) return true;
+  return false;
 }
 
 export function saveApiKey(key: string, p?: AiProvider): void {
   localStorage.setItem(API_KEY_PREFIX + (p ?? getProvider()), key.trim());
   // Dispatch custom event to notify components about the API key change
-  window.dispatchEvent(new CustomEvent('ai-key-changed', { 
-    detail: { provider: p ?? getProvider(), hasKey: true } 
+  window.dispatchEvent(new CustomEvent('ai-key-changed', {
+    detail: { provider: p ?? getProvider(), hasKey: true }
   }));
 }
 
 export function clearApiKey(p?: AiProvider): void {
   localStorage.removeItem(API_KEY_PREFIX + (p ?? getProvider()));
   // Dispatch custom event to notify components about the API key change
-  window.dispatchEvent(new CustomEvent('ai-key-changed', { 
-    detail: { provider: p ?? getProvider(), hasKey: false } 
+  window.dispatchEvent(new CustomEvent('ai-key-changed', {
+    detail: { provider: p ?? getProvider(), hasKey: false }
+  }));
+}
+
+export function getTrialUsesLeft(): number {
+  const usesInfo = localStorage.getItem(TRIAL_USES_KEY);
+  if (!usesInfo) return MAX_TRIAL_USES;
+  const uses = parseInt(usesInfo, 10);
+  if (isNaN(uses)) return MAX_TRIAL_USES;
+  return Math.max(0, MAX_TRIAL_USES - uses);
+}
+
+export function incrementTrialUses(): void {
+  const usesInfo = localStorage.getItem(TRIAL_USES_KEY);
+  const currentUses = usesInfo ? parseInt(usesInfo, 10) || 0 : 0;
+  const newUses = currentUses + 1;
+  localStorage.setItem(TRIAL_USES_KEY, newUses.toString());
+  window.dispatchEvent(new CustomEvent('ai-trial-updated', {
+    detail: { usesLeft: Math.max(0, MAX_TRIAL_USES - newUses) }
   }));
 }
 
 async function callAI(system: string, user: string): Promise<string> {
   const provider = getProvider();
-  const key = getApiKey();
-  if (!key) throw new AiKeyMissingError();
+  let key = getApiKey();
+  let isTrial = false;
+
+  if (!key) {
+    const defaultKey = import.meta.env.VITE_DEFAULT_AI_KEY;
+    if (defaultKey && getTrialUsesLeft() > 0) {
+      key = defaultKey;
+      isTrial = true;
+      // When relying on the trial key, the provider is dictated by `getProvider()`.
+    } else {
+      throw new AiKeyMissingError();
+    }
+  }
 
   try {
     if (provider === 'claude') {
@@ -101,7 +150,7 @@ async function callAI(system: string, user: string): Promise<string> {
           messages: [{ role: 'user', content: user }],
         }),
       });
-      
+
       if (!res.ok) {
         if (res.status === 401) throw new AiAuthError();
         if (res.status === 429) {
@@ -111,12 +160,13 @@ async function callAI(system: string, user: string): Promise<string> {
         if (res.status >= 500) throw new AiNetworkError(`Server error: ${res.status}`);
         throw new Error(`API error ${res.status}: ${res.statusText}`);
       }
-      
+
       const data = await res.json();
       const result = data.content?.[0]?.text?.trim() ?? '';
       if (!result) throw new Error('AI returned empty response');
+      if (isTrial) incrementTrialUses();
       return result;
-      
+
     } else {
       const res = await fetch(`${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=${key}`, {
         method: 'POST',
@@ -126,7 +176,7 @@ async function callAI(system: string, user: string): Promise<string> {
           contents: [{ role: 'user', parts: [{ text: user }] }],
         }),
       });
-      
+
       if (!res.ok) {
         if (res.status === 400 || res.status === 403) throw new AiAuthError();
         if (res.status === 429) {
@@ -136,10 +186,11 @@ async function callAI(system: string, user: string): Promise<string> {
         if (res.status >= 500) throw new AiNetworkError(`Server error: ${res.status}`);
         throw new Error(`API error ${res.status}: ${res.statusText}`);
       }
-      
+
       const data = await res.json();
       const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
       if (!result) throw new Error('AI returned empty response');
+      if (isTrial) incrementTrialUses();
       return result;
     }
   } catch (error) {
