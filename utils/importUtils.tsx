@@ -2,6 +2,7 @@ import { DataModel, Layer, ModelProperty, PropertyType, GeometryType, PropertyCo
 import { createEmptyModel, createEmptyProperty, createEmptyLayer } from '../constants';
 import { normalizeGeometryType } from './geomUtils';
 import { mapSqlTypeToPropertyType } from './typeMapUtils';
+import { sanitizeTechnicalName } from './nameSanitizer';
 
 export { normalizeGeometryType } from './geomUtils';
 export { mapSqlTypeToPropertyType } from './typeMapUtils';
@@ -20,7 +21,7 @@ export const processGeoJsonToModel = (json: any, name: string): DataModel => {
     const p = firstFeature.properties || firstFeature;
     const newProperties = Object.keys(p).map(key => ({
       ...createEmptyProperty(),
-      name: key,
+      name: sanitizeTechnicalName(key),
       title: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
       type: typeof p[key] === 'number' ? (Number.isInteger(p[key]) ? 'integer' : 'number') : 'string' as PropertyType,
       constraints: {}
@@ -35,55 +36,56 @@ export const processOpenApiToModel = (json: any, name: string): DataModel => {
   const newModel = createEmptyModel();
   newModel.name = name.replace(/\.[^/.]+$/, "") || "API Model";
   const layers: Layer[] = [];
-  
+
   const schemas = json.components?.schemas || json.definitions || {};
-  
+
   const ignoreList = [
-    'Link', 'Geometry', 'Point', 'MultiPoint', 'Polygon', 'MultiPolygon', 
-    'LineString', 'MultiLineString', 'GeometryCollection', 'Feature', 
+    'Link', 'Geometry', 'Point', 'MultiPoint', 'Polygon', 'MultiPolygon',
+    'LineString', 'MultiLineString', 'GeometryCollection', 'Feature',
     'FeatureCollection', 'Extent', 'Collection', 'ConfClasses', 'Exception'
   ];
-  
+
   for (const [tableName, schema] of Object.entries(schemas)) {
     if (ignoreList.includes(tableName)) continue;
-    
+
     const props = (schema as any).properties;
     if (!props) continue;
 
     const properties: ModelProperty[] = [];
     const requiredProps = (schema as any).required || [];
-    
+
     let geometryColumnName = '';
     let geometryType: GeometryType = 'Polygon';
 
     for (const [propName, propDef] of Object.entries(props)) {
-       const pDef = propDef as any;
-       const rawType = pDef.format || pDef.type || 'string';
-       const description = pDef.description?.toLowerCase() || '';
-       
-       let mappedType: PropertyType = 'string';
-       
-       if (rawType.includes('int')) mappedType = 'integer';
-       else if (rawType.includes('numeric') || rawType === 'number' || rawType.includes('float')) mappedType = 'number';
-       else if (rawType === 'boolean') mappedType = 'boolean';
-       else if (rawType.includes('date') || rawType.includes('timestamp')) mappedType = 'date';
-       
-       if (description.includes('geometry') || rawType.includes('geometry') || rawType.includes('geography')) {
-         mappedType = 'geometry';
-         geometryColumnName = propName;
-         geometryType = normalizeGeometryType(rawType + " " + description);
-       }
+      const pDef = propDef as any;
+      const rawType = pDef.format || pDef.type || 'string';
+      const description = pDef.description?.toLowerCase() || '';
 
-       properties.push({
-         ...createEmptyProperty(),
-         name: propName,
-         title: propName.charAt(0).toUpperCase() + propName.slice(1).replace(/_/g, ' '),
-         type: mappedType,
-         required: requiredProps.includes(propName),
-         constraints: pDef.default ? { defaultValue: pDef.default } : {}
-       });
+      let mappedType: PropertyType = 'string';
+
+      if (rawType.includes('int')) mappedType = 'integer';
+      else if (rawType.includes('numeric') || rawType === 'number' || rawType.includes('float')) mappedType = 'number';
+      else if (rawType === 'boolean') mappedType = 'boolean';
+      else if (rawType.includes('date') || rawType.includes('timestamp')) mappedType = 'date';
+
+      if (description.includes('geometry') || rawType.includes('geometry') || rawType.includes('geography')) {
+        mappedType = 'geometry';
+        geometryColumnName = sanitizeTechnicalName(propName);
+        geometryType = normalizeGeometryType(rawType + " " + description);
+      }
+
+      properties.push({
+        ...createEmptyProperty(),
+        name: sanitizeTechnicalName(propName),
+        title: propName.charAt(0).toUpperCase() + propName.slice(1).replace(/_/g, ' '),
+        type: mappedType,
+        required: requiredProps.includes(propName),
+        defaultValue: pDef.default ? String(pDef.default) : '',
+        constraints: {}
+      });
     }
-    
+
     layers.push({
       ...createEmptyLayer(tableName),
       properties,
@@ -91,7 +93,7 @@ export const processOpenApiToModel = (json: any, name: string): DataModel => {
       geometryType
     });
   }
-  
+
   newModel.layers = layers.length > 0 ? layers : [createEmptyLayer()];
   return newModel;
 };
@@ -104,7 +106,7 @@ export const processOgcCollectionsToModel = async (json: any, name: string, base
   for (const collection of json.collections) {
     const collectionId = collection.id;
     let itemsUrl = '';
-    
+
     const itemsLink = collection.links?.find((l: any) => l.rel === 'items');
     if (itemsLink) {
       itemsUrl = itemsLink.href;
@@ -118,31 +120,31 @@ export const processOgcCollectionsToModel = async (json: any, name: string, base
       const res = await fetch(itemsUrl);
       if (!res.ok) continue;
       const itemsJson = await res.json();
-      
+
       const properties: ModelProperty[] = [];
       let geometryColumnName = 'geometry';
       let geometryType: GeometryType = 'Polygon';
-      
+
       const features = itemsJson.features || [];
       if (features.length > 0) {
-         const firstFeature = features[0];
-         
-         if (firstFeature.geometry && firstFeature.geometry.type) {
-           geometryType = normalizeGeometryType(firstFeature.geometry.type);
-         }
-         
-         const p = firstFeature.properties || {};
-         Object.keys(p).forEach(key => {
-           properties.push({
-             ...createEmptyProperty(),
-             name: key,
-             title: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
-             type: typeof p[key] === 'number' ? (Number.isInteger(p[key]) ? 'integer' : 'number') : 'string',
-             constraints: {}
-           });
-         });
+        const firstFeature = features[0];
+
+        if (firstFeature.geometry && firstFeature.geometry.type) {
+          geometryType = normalizeGeometryType(firstFeature.geometry.type);
+        }
+
+        const p = firstFeature.properties || {};
+        Object.keys(p).forEach(key => {
+          properties.push({
+            ...createEmptyProperty(),
+            name: sanitizeTechnicalName(key),
+            title: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
+            type: typeof p[key] === 'number' ? (Number.isInteger(p[key]) ? 'integer' : 'number') : 'string',
+            constraints: {}
+          });
+        });
       }
-      
+
       layers.push({
         ...createEmptyLayer(collectionId),
         name: collection.title || collectionId,
@@ -150,7 +152,7 @@ export const processOgcCollectionsToModel = async (json: any, name: string, base
         geometryColumnName,
         geometryType
       });
-      
+
     } catch (e) {
       console.warn(`Could not fetch items for layer: ${collectionId}`, e);
     }
@@ -166,15 +168,15 @@ export const processSqlToModel = (sqlText: string, name: string): DataModel => {
   const layers: Layer[] = [];
 
   const createTableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[\w"']+\.)?["']?([\w]+)["']?\s*\(([\s\S]*?)\)(?:;|\s*$)/gi;
-  
+
   let match;
   while ((match = createTableRegex.exec(sqlText)) !== null) {
     const tableName = match[1];
     const columnsText = match[2];
     const properties: ModelProperty[] = [];
-    
+
     const columnLines = columnsText.split(/,(?![^\(]*\))/);
-    
+
     let geometryColumnName = '';
     let geometryType: GeometryType = 'Polygon';
 
@@ -183,21 +185,21 @@ export const processSqlToModel = (sqlText: string, name: string): DataModel => {
       if (!line || line.toUpperCase().startsWith('PRIMARY KEY') || line.toUpperCase().startsWith('CONSTRAINT') || line.toUpperCase().startsWith('FOREIGN KEY')) {
         continue;
       }
-      
+
       const colMatch = line.match(/^["']?([\w]+)["']?\s+([\w\(\)]+)/i);
       if (colMatch) {
         const colName = colMatch[1];
         const colType = colMatch[2];
         const mappedType = mapSqlTypeToPropertyType(colType);
-        
+
         if (mappedType === 'geometry') {
-           geometryColumnName = colName;
-           geometryType = normalizeGeometryType(colType); 
+          geometryColumnName = sanitizeTechnicalName(colName);
+          geometryType = normalizeGeometryType(colType);
         }
 
         properties.push({
           ...createEmptyProperty(),
-          name: colName,
+          name: sanitizeTechnicalName(colName),
           title: colName.charAt(0).toUpperCase() + colName.slice(1).replace(/_/g, ' '),
           type: mappedType,
           required: line.toUpperCase().includes('NOT NULL'),
@@ -326,10 +328,10 @@ export const validateGeoPackageIdFields = async (
   return warnings;
 };
 
-export const processGpkgFile = async (file: File): Promise<{ 
-  model: DataModel; 
-  summary: InferredDataSummary; 
-  validation: ImportValidationResult 
+export const processGpkgFile = async (file: File): Promise<{
+  model: DataModel;
+  summary: InferredDataSummary;
+  validation: ImportValidationResult
 }> => {
   const SQL = await initSqlJs({ locateFile: () => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.wasm` });
   const arrayBuffer = await file.arrayBuffer();
@@ -353,7 +355,7 @@ export const processGpkgFile = async (file: File): Promise<{
       // Geometry metadata + SRS
       const geomMetaRes = db.exec(`SELECT column_name, geometry_type_name, srs_id FROM gpkg_geometry_columns WHERE table_name = '${tableName}'`);
       if (geomMetaRes.length > 0 && geomMetaRes[0].values.length > 0) {
-        geometryColumnName = String(geomMetaRes[0].values[0][0]);
+        geometryColumnName = sanitizeTechnicalName(String(geomMetaRes[0].values[0][0]));
         geometryType = normalizeGeometryType(String(geomMetaRes[0].values[0][1]));
         srid = Number(geomMetaRes[0].values[0][2]) || 25833;
         globalSrid = srid;
@@ -407,7 +409,7 @@ export const processGpkgFile = async (file: File): Promise<{
             if (isPk) c.isPrimaryKey = true;
             properties.push({
               ...createEmptyProperty(),
-              name,
+              name: sanitizeTechnicalName(name),
               title: name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, ' '),
               type: mapSqlTypeToPropertyType(type),
               required: notNull,
