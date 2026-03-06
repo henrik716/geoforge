@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getApiKey, getProvider } from '../utils/aiService';
+import { getApiKey, getProvider, hasApiKey, getTrialUsesLeft } from '../utils/aiService';
 import { AiOperationType, useAiContext } from './useAiContext';
 
 export interface AiStatusInfo {
@@ -13,6 +13,8 @@ export interface AiStatusInfo {
     timestamp: number;
     success: boolean;
   } | null;
+  trialUsesLeft: number;
+  hasDefaultKey: boolean;
 }
 
 export const useAiStatus = () => {
@@ -32,18 +34,35 @@ export const useAiStatus = () => {
     }
   }, [aiContext.status, aiContext.currentOperation]);
 
-  const [hasKey, setHasKey] = useState(!!getApiKey());
+  const [hasKey, setHasKey] = useState(hasApiKey());
   const [provider, setProvider] = useState(getProvider());
+  const [trialUsesLeft, setTrialUsesLeft] = useState(getTrialUsesLeft());
+  const [hasDefaultKey] = useState(!!import.meta.env.VITE_DEFAULT_AI_KEY);
 
   useEffect(() => {
     const handleKeyChange = (e: Event) => {
       const customEvent = e as CustomEvent<{ provider: string; hasKey: boolean }>;
-      setHasKey(customEvent.detail.hasKey);
+      // Still need to re-check hasApiKey to include trial fallback logic
+      setHasKey(hasApiKey());
       setProvider(customEvent.detail.provider);
     };
 
+    const handleTrialUpdate = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail && typeof customEvent.detail.usesLeft !== 'undefined') {
+        setTrialUsesLeft(customEvent.detail.usesLeft);
+      } else {
+        setTrialUsesLeft(getTrialUsesLeft());
+      }
+      setHasKey(hasApiKey());
+    };
+
     window.addEventListener('ai-key-changed', handleKeyChange);
-    return () => window.removeEventListener('ai-key-changed', handleKeyChange);
+    window.addEventListener('ai-trial-updated', handleTrialUpdate);
+    return () => {
+      window.removeEventListener('ai-key-changed', handleKeyChange);
+      window.removeEventListener('ai-trial-updated', handleTrialUpdate);
+    };
   }, []);
 
   return {
@@ -55,6 +74,8 @@ export const useAiStatus = () => {
     lastOperation,
     error: aiContext.error,
     configureApiKey: aiContext.configureApiKey,
-    clearError: aiContext.clearError
+    clearError: aiContext.clearError,
+    trialUsesLeft,
+    hasDefaultKey
   };
 };

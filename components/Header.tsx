@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { HelpCircle, Hammer, Sparkles, X, Activity, Check, AlertTriangle } from 'lucide-react';
 import { Language } from '../types';
-import { AiProvider, getProvider, setProvider, getApiKey, saveApiKey, clearApiKey } from '../utils/aiService';
+import { AiProvider, getProvider, setProvider, getApiKey, saveApiKey, clearApiKey, getTrialUsesLeft } from '../utils/aiService';
 import { useAiStatus } from '../hooks/useAiStatus';
 import AiConfigModal from './ai/AiConfigModal';
 import AiErrorHandler from './ai/AiErrorHandler';
@@ -17,7 +17,7 @@ const Header: React.FC<{
   const [showAiModal, setShowAiModal] = useState(false);
   const [pendingOperation, setPendingOperation] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  
+
   const aiStatus = useAiStatus();
 
   useEffect(() => {
@@ -93,6 +93,11 @@ const Header: React.FC<{
                 {aiStatus.provider}
               </span>
             )}
+            {aiStatus.hasDefaultKey && !getApiKey() && aiStatus.trialUsesLeft > 0 && (
+              <span className="hidden md:block text-[9px] font-black uppercase bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1">
+                {aiStatus.trialUsesLeft} {t.ai?.left || 'LEFT'}
+              </span>
+            )}
             {aiStatus.isActive && (
               <div className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-600 rounded-full animate-pulse" />
             )}
@@ -133,7 +138,7 @@ const Header: React.FC<{
                     )}
                   </div>
                 </div>
-                
+
                 {aiStatus.operationCount > 0 && (
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-slate-500">{t.ai?.operations || 'Operations'}</span>
@@ -163,7 +168,7 @@ const Header: React.FC<{
                   <Sparkles size={14} />
                   {t.ai?.configureApiKeyButton || 'Configure API Key'}
                 </button>
-                
+
                 {aiStatus.error && (
                   <AiErrorHandler
                     error={aiStatus.error}

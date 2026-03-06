@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Sparkles, Check, AlertCircle, HelpCircle, ExternalLink } from 'lucide-react';
-import { AiProvider, getProvider, setProvider, getApiKey, saveApiKey, clearApiKey } from '../../utils/aiService';
+import { AiProvider, getProvider, setProvider, getApiKey, saveApiKey, clearApiKey, getTrialUsesLeft } from '../../utils/aiService';
 import { AiOperationType } from '../../hooks/useAiContext';
 
 interface AiConfigModalProps {
@@ -39,7 +39,9 @@ const AiConfigModal: React.FC<AiConfigModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
+  const [trialUsesLeft, setTrialUsesLeft] = useState(getTrialUsesLeft());
   const modalRef = useRef<HTMLDivElement>(null);
+  const hasDefaultKey = !!import.meta.env.VITE_DEFAULT_AI_KEY;
 
   useEffect(() => {
     if (isOpen) {
@@ -48,8 +50,23 @@ const AiConfigModal: React.FC<AiConfigModalProps> = ({
       setHasKey(!!getApiKey());
       setSaveError('');
       setShowSuccess(false);
+      setTrialUsesLeft(getTrialUsesLeft());
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    const handleTrialUpdate = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail && typeof customEvent.detail.usesLeft !== 'undefined') {
+        setTrialUsesLeft(customEvent.detail.usesLeft);
+      } else {
+        setTrialUsesLeft(getTrialUsesLeft());
+      }
+    };
+
+    window.addEventListener('ai-trial-updated', handleTrialUpdate);
+    return () => window.removeEventListener('ai-trial-updated', handleTrialUpdate);
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -147,8 +164,8 @@ const AiConfigModal: React.FC<AiConfigModalProps> = ({
                   key={p}
                   onClick={() => handleProviderChange(p)}
                   className={`p-3 rounded-xl border-2 transition-all ${provider === p
-                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                      : 'border-slate-200 hover:border-slate-300 text-slate-600'
+                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                    : 'border-slate-200 hover:border-slate-300 text-slate-600'
                     }`}
                 >
                   <div className="text-sm font-bold">{help.name}</div>
@@ -181,6 +198,26 @@ const AiConfigModal: React.FC<AiConfigModalProps> = ({
               <ExternalLink size={10} />
             </a>
           </div>
+
+          {!hasKey && hasDefaultKey && (
+            <div className={`flex items-center gap-2 px-4 py-3 mb-3 rounded-xl border ${trialUsesLeft > 0 ? 'bg-indigo-50 border-indigo-100 text-indigo-700' : 'bg-rose-50 border-rose-100 text-rose-700'}`}>
+              {trialUsesLeft > 0 ? (
+                <>
+                  <Sparkles size={16} />
+                  <span className="text-sm font-medium">
+                    {t.ai?.trialUsesLeft?.replace('{uses}', trialUsesLeft.toString()) || `${trialUsesLeft} free AI uses left. Add your own key for unlimited use.`}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <AlertCircle size={16} />
+                  <span className="text-sm font-medium">
+                    {t.ai?.trialExhausted || 'Free trial exhausted. Please add your own API key.'}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
 
           {hasKey && !keyDraft ? (
             <div className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 mb-3">
