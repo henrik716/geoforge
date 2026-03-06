@@ -96,8 +96,8 @@ const DeployPanel: React.FC<DeployPanelProps> = ({ model, t, lang, onSourceChang
 
   // Handle OAuth authentication changes
   const handleOAuthChange = (isAuthenticated: boolean, user?: any, token?: any) => {
-    if (isAuthenticated && user && token) {
-      setOAuthUser(user);
+    if (isAuthenticated && token) {
+      setOAuthUser(user || null);
       setOAuthToken(token);
     } else {
       setOAuthUser(null);

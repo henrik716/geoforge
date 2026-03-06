@@ -32,8 +32,19 @@ export const useAiStatus = () => {
     }
   }, [aiContext.status, aiContext.currentOperation]);
 
-  const hasKey = !!getApiKey();
-  const provider = getProvider();
+  const [hasKey, setHasKey] = useState(!!getApiKey());
+  const [provider, setProvider] = useState(getProvider());
+
+  useEffect(() => {
+    const handleKeyChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ provider: string; hasKey: boolean }>;
+      setHasKey(customEvent.detail.hasKey);
+      setProvider(customEvent.detail.provider);
+    };
+
+    window.addEventListener('ai-key-changed', handleKeyChange);
+    return () => window.removeEventListener('ai-key-changed', handleKeyChange);
+  }, []);
 
   return {
     hasKey,
