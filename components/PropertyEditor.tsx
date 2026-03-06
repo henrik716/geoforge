@@ -12,6 +12,7 @@ import {
   AiProvider, AiConstraintSuggestion,
   generatePropertyDescription, suggestFieldType, inferConstraints, hasApiKey,
 } from '../utils/aiService';
+import { sanitizeTechnicalName } from '../utils/nameSanitizer';
 import { useAiContext } from '../hooks/useAiContext';
 import AiLoadingSkeleton from './ai/AiLoadingSkeleton';
 import AiErrorHandler from './ai/AiErrorHandler';
@@ -87,7 +88,7 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
   const config = TYPE_CONFIG[prop.type] || TYPE_CONFIG.string;
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [constraintSuggestion, setConstraintSuggestion] = useState<AiConstraintSuggestion | null>(null);
-  
+
   const aiContext = useAiContext();
 
   const handleGenerateDescription = () => {
@@ -97,7 +98,7 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
       }));
       return;
     }
-    
+
     aiContext.setLoading('description', `Generating description for "${prop.name}"…`);
     generatePropertyDescription({
       fieldName: prop.name || 'field',
@@ -119,7 +120,7 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
       }));
       return;
     }
-    
+
     aiContext.setLoading('type', `Analyzing "${prop.name}" to suggest type…`);
     suggestFieldType({
       fieldName: prop.name || 'field',
@@ -144,7 +145,7 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
       }));
       return;
     }
-    
+
     aiContext.setLoading('constraints', `Inferring constraints for "${prop.name}"…`);
     inferConstraints({
       fieldName: prop.name || 'field',
@@ -204,7 +205,7 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
   const handleMoveSubProperty = (id: string, direction: 'up' | 'down') => {
     const index = (prop.subProperties || []).findIndex(p => p.id === id);
     if (index === -1) return;
-    
+
     const newProps = [...(prop.subProperties || [])];
     if (direction === 'up' && index > 0) {
       [newProps[index - 1], newProps[index]] = [newProps[index], newProps[index - 1]];
@@ -219,13 +220,13 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
 
   const renderDefaultInput = () => {
     const commonClasses = "w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all h-12";
-    
+
     switch (prop.type) {
       case 'boolean':
         return (
           <div className="flex items-center gap-3 py-2">
-            <input 
-              type="checkbox" 
+            <input
+              type="checkbox"
               checked={prop.defaultValue === 'true'}
               onChange={e => handleUpdate({ defaultValue: e.target.checked ? 'true' : 'false' })}
               className="w-7 h-7 rounded-md border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600 cursor-pointer"
@@ -292,7 +293,7 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
             <div className="flex items-center gap-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-0.5">
               <span>{t.types[prop.type]}</span>
               {prop.title && <span className="hidden xs:inline truncate opacity-60">• {prop.title}</span>}
-              
+
               {/* Vise navnet på den delte typen i overskriften hvis det er valgt */}
               {prop.type === 'shared_type' && prop.sharedTypeId && (
                 <span className="hidden xs:inline font-bold text-fuchsia-600 truncate ml-1 px-1.5 py-0.5 bg-fuchsia-50 rounded">
@@ -314,7 +315,7 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
         <div className="px-5 pb-8 pt-2 border-t border-slate-50 space-y-6 animate-in slide-in-from-top-2 duration-200">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <PropDiffField label={t.propName} currentValue={prop.name} baselineValue={baselineProp?.name} reviewMode={!!reviewMode}>
-              <input ref={nameInputRef} type="text" placeholder={t.propNamePlaceholder} value={prop.name} onChange={e => handleUpdate({ name: e.target.value.replace(/\s+/g, '_').toLowerCase() })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-sm font-mono focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all h-12" />
+              <input ref={nameInputRef} type="text" placeholder={t.propNamePlaceholder} value={prop.name} onChange={e => handleUpdate({ name: sanitizeTechnicalName(e.target.value) })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-sm font-mono focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all h-12" />
             </PropDiffField>
             <PropDiffField label={t.propTitle} currentValue={prop.title} baselineValue={baselineProp?.title} reviewMode={!!reviewMode}>
               <input type="text" placeholder={t.propTitlePlaceholder} value={prop.title} onChange={e => handleUpdate({ title: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all h-12" />
@@ -344,8 +345,8 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
             {prop.type === 'shared_type' && (
               <PropDiffField label="Velg Datatype" currentValue={prop.sharedTypeId} baselineValue={baselineProp?.sharedTypeId} reviewMode={!!reviewMode}>
                 <div className="relative">
-                  <select 
-                    value={prop.sharedTypeId || ''} 
+                  <select
+                    value={prop.sharedTypeId || ''}
                     onChange={e => handleUpdate({ sharedTypeId: e.target.value })}
                     className="w-full bg-fuchsia-50 border border-fuchsia-200 text-fuchsia-900 rounded-xl px-4 py-3.5 text-sm font-bold focus:ring-4 focus:ring-fuchsia-500/10 focus:border-fuchsia-500 outline-none transition-all appearance-none cursor-pointer h-12"
                   >
@@ -362,7 +363,7 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
 
           {prop.type !== 'object' && prop.type !== 'array' && prop.type !== 'shared_type' && (
             <PropDiffField label={t.propDefault} currentValue={prop.defaultValue} baselineValue={baselineProp?.defaultValue} reviewMode={!!reviewMode}>
-               {renderDefaultInput()}
+              {renderDefaultInput()}
             </PropDiffField>
           )}
 
@@ -419,8 +420,8 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <PropDiffField label={t.propTargetLayer} currentValue={prop.relationConfig?.targetLayerId} baselineValue={baselineProp?.relationConfig?.targetLayerId} reviewMode={!!reviewMode}>
                   <div className="relative">
-                    <select 
-                      value={prop.relationConfig?.targetLayerId || ''} 
+                    <select
+                      value={prop.relationConfig?.targetLayerId || ''}
                       onChange={e => handleUpdate({ relationConfig: { ...(prop.relationConfig || { relationType: 'foreign_key' }), targetLayerId: e.target.value } as any })}
                       className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3.5 text-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all appearance-none cursor-pointer h-12"
                     >
@@ -435,8 +436,8 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
 
                 <PropDiffField label={t.propRelationType} currentValue={prop.relationConfig?.relationType} baselineValue={baselineProp?.relationConfig?.relationType} reviewMode={!!reviewMode}>
                   <div className="relative">
-                    <select 
-                      value={prop.relationConfig?.relationType || 'foreign_key'} 
+                    <select
+                      value={prop.relationConfig?.relationType || 'foreign_key'}
                       onChange={e => handleUpdate({ relationConfig: { ...(prop.relationConfig || { targetLayerId: '' }), relationType: e.target.value as any } as any })}
                       className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3.5 text-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all appearance-none cursor-pointer h-12"
                     >
@@ -460,11 +461,11 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
                 <div className="pt-2">
                   <PropDiffField label="" currentValue={prop.relationConfig?.cascadeDelete} baselineValue={baselineProp?.relationConfig?.cascadeDelete} reviewMode={!!reviewMode}>
                     <label className="flex items-center gap-3 cursor-pointer select-none">
-                      <input 
-                        type="checkbox" 
-                        checked={!!prop.relationConfig?.cascadeDelete} 
+                      <input
+                        type="checkbox"
+                        checked={!!prop.relationConfig?.cascadeDelete}
                         onChange={e => handleUpdate({ relationConfig: { ...(prop.relationConfig || { targetLayerId: '', relationType: 'foreign_key' }), cascadeDelete: e.target.checked } as any })}
-                        className="w-6 h-6 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600" 
+                        className="w-6 h-6 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600"
                       />
                       <span className="text-[10px] font-black text-slate-600 uppercase tracking-wide">{t.propCascadeDelete}</span>
                     </label>
@@ -495,7 +496,7 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
           {(prop.type === 'object' || prop.type === 'array') && (
             <div className="mt-8 relative">
               <div className={`absolute top-0 bottom-0 left-5 w-0.5 ${getDepthColor()} rounded-full opacity-50`}></div>
-              
+
               <div className="pl-10 space-y-4">
                 <div className="flex items-center gap-2 mb-2">
                   <CornerDownRight size={16} className={depth === 0 ? "text-slate-400" : "text-indigo-400"} />
@@ -503,7 +504,7 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
                     {prop.type === 'object' ? 'Objekt-struktur' : 'Array-struktur'}
                   </h4>
                 </div>
-                
+
                 <div className="space-y-3">
                   {(prop.subProperties || []).map((subProp, idx) => {
                     const subBaseline = baselineProp?.subProperties?.find(p => p.id === subProp.id);
@@ -531,8 +532,8 @@ const PropertyEditor: React.FC<PropertyEditorProps> = ({
                 </div>
 
                 {!isGhost && (
-                  <button 
-                    onClick={handleAddSubProperty} 
+                  <button
+                    onClick={handleAddSubProperty}
                     className={`w-full py-4 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 font-black text-[9px] uppercase tracking-[0.2em] hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/50 transition-all flex items-center justify-center gap-2 active:scale-[0.99]`}
                   >
                     <Plus size={14} /> {t.addSubProperty || 'Legg til under-felt'}

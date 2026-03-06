@@ -17,6 +17,7 @@ import {
 import { createEmptyModel, createEmptyProperty, createEmptyLayer } from '../constants';
 import { normalizeGeometryType } from './geomUtils';
 import { InferredDataSummary, InferredLayerSummary } from './importUtils';
+import { sanitizeTechnicalName } from './nameSanitizer';
 
 // ============================================================
 // GDAL instance — lazy loaded, singleton
@@ -41,8 +42,8 @@ export const getGdal = async (): Promise<any> => {
     try {
       const mod = await import('gdal3.js');
       initFn = typeof mod === 'function' ? mod :
-               typeof mod.default === 'function' ? mod.default :
-               typeof mod.initGdalJs === 'function' ? mod.initGdalJs : null;
+        typeof mod.default === 'function' ? mod.default :
+          typeof (mod as any).initGdalJs === 'function' ? (mod as any).initGdalJs : null;
     } catch (e) {
       console.warn("Lokal import feilet, går over til script-fallback.");
     }
@@ -68,7 +69,7 @@ export const getGdal = async (): Promise<any> => {
     // 3. MAGIEN: Vi dropper Worker fullstendig i AI Studio!
     // Dette omgår alle CORS-feil fordi alt kjøres i hovedtråden.
     gdalInstance = await initFn({
-      path: GDAL_CDN_PATH, 
+      path: GDAL_CDN_PATH,
       useWorker: false // <--- Dette fikser alt
     });
 
@@ -232,7 +233,7 @@ const getDatasetInfoJson = async (Gdal: any, dataset: any): Promise<GdalDatasetI
   try {
     // 1. Prøv JSON-output først
     const jsonOutput = await Gdal.ogrinfo(dataset, ['-json', '-al', '-so']);
-    
+
     // SIKRING: Hvis gdal3.js allerede har gjort det om til et objekt, bruk det. 
     // Hvis det er en tekststreng, bruker vi JSON.parse.
     const parsed = typeof jsonOutput === 'string' ? JSON.parse(jsonOutput) : jsonOutput;
@@ -275,12 +276,12 @@ const getDatasetInfoJson = async (Gdal: any, dataset: any): Promise<GdalDatasetI
     if (basicInfo.type !== 'vector') return null;
 
     const textOutput = await Gdal.ogrinfo(dataset, ['-al', '-so']);
-    
+
     // SIKRING: Hent ut selve tekststrengen uansett hva slags format Gdal returnerer
-    const textStr = typeof textOutput === 'string' ? textOutput : 
-                    (textOutput && textOutput.stdout) ? textOutput.stdout : 
-                    (textOutput && textOutput.text) ? textOutput.text : 
-                    String(textOutput);
+    const textStr = typeof textOutput === 'string' ? textOutput :
+      (textOutput && textOutput.stdout) ? textOutput.stdout :
+        (textOutput && textOutput.text) ? textOutput.text :
+          String(textOutput);
 
     const layers = parseOgrinfoText(textStr, basicInfo);
 
@@ -334,8 +335,8 @@ const parseOgrinfoText = (text: string, basicInfo: any): GdalLayerInfo[] => {
       // Field lines look like: "fieldname: Type (width.precision)"
       const fieldMatch = trimmed.match(/^(\w[\w\s]*\w|\w+):\s+(\w+)\s*(?:\((\d+)(?:\.(\d+))?\))?/);
       if (fieldMatch && !trimmed.startsWith('Geometry:') && !trimmed.startsWith('Feature Count:')
-          && !trimmed.startsWith('Extent:') && !trimmed.startsWith('Layer name:')
-          && !trimmed.startsWith('Layer SRS')) {
+        && !trimmed.startsWith('Extent:') && !trimmed.startsWith('Layer name:')
+        && !trimmed.startsWith('Layer SRS')) {
         fields.push({
           name: fieldMatch[1].trim(),
           type: fieldMatch[2],
@@ -459,7 +460,7 @@ export const gdalInfoToModel = (
     const geometryType = geomField
       ? normalizeGeometryType(geomField.type)
       : 'Polygon' as GeometryType;
-    const geometryColumnName = geomField?.name || 'geometry';
+    const geometryColumnName = geomField?.name ? sanitizeTechnicalName(geomField.name) : 'geometry';
 
     // Extract CRS
     const srid = extractEpsgFromSrs(geomField?.srs);
@@ -482,13 +483,13 @@ export const gdalInfoToModel = (
 
     // Map fields to GeoForge properties
     const properties: ModelProperty[] = layerInfo.fields
-      .filter(f => f.name.toLowerCase() !== 'fid' && f.name.toLowerCase() !== geometryColumnName.toLowerCase())
+      .filter(f => f.name.toLowerCase() !== 'fid' && sanitizeTechnicalName(f.name).toLowerCase() !== geometryColumnName.toLowerCase())
       .map(f => {
         const constraints: PropertyConstraints = {};
         if (f.uniqueConstraint) constraints.isPrimaryKey = true;
         return {
           ...createEmptyProperty(),
-          name: f.name,
+          name: sanitizeTechnicalName(f.name),
           title: f.name.charAt(0).toUpperCase() + f.name.slice(1).replace(/_/g, ' '),
           type: gdalTypeToPropertyType(f.type),
           required: f.nullable === false,
@@ -500,7 +501,7 @@ export const gdalInfoToModel = (
     let primaryKeyColumn = 'fid';
     const pkField = layerInfo.fields.find(f => f.uniqueConstraint);
     if (pkField) {
-      primaryKeyColumn = pkField.name;
+      primaryKeyColumn = sanitizeTechnicalName(pkField.name);
     }
 
     layers.push({
@@ -561,15 +562,15 @@ export const processFilesWithGdal = async (
       const text = await mainFile.text();
       const geojson = JSON.parse(text);
       const features = geojson.features || (Array.isArray(geojson) ? geojson : []);
-      
+
       // Check if we have mixed geometry types
       const geometryTypes = new Set(features.map((f: any) => f.geometry?.type));
-      
+
       if (geometryTypes.size > 1) {
         // Split by geometry type and create separate files
         const splitByType = splitGeoJsonByGeometryType(geojson);
         filesToProcess = [];
-        
+
         for (const [geomType, geojsonData] of Object.entries(splitByType)) {
           const splitJson = JSON.stringify(geojsonData);
           const blob = new Blob([splitJson], { type: 'application/json' });
@@ -604,15 +605,15 @@ export const processFilesWithGdal = async (
   const errors: ImportError[] = [];
 
   for (const layerSummary of result.summary.layers) {
-    
+
     // Find the corresponding model layer to check properties (like DeployPanel does)
     const modelLayer = result.model.layers.find(l => l.name === layerSummary.tableName);
-    
+
     // Check if layer has a proper ID field in properties (same logic as DeployPanel)
-    const hasIdField = modelLayer?.properties.some(p => 
+    const hasIdField = modelLayer?.properties.some(p =>
       p.name.toLowerCase() === 'id' || p.name.toLowerCase() === 'fid'
     );
-    
+
     if (!hasIdField) {
       warnings.push({
         type: 'no_primary_key',
