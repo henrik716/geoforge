@@ -80,7 +80,11 @@ const server = createServer(async (req, res) => {
       filePath = join(DIST, 'index.html');
     }
 
-    res.writeHead(200, { 'Content-Type': MIME[extname(filePath)] || 'application/octet-stream' });
+    const isAsset = filePath.includes(join(DIST, 'assets'));
+    res.writeHead(200, {
+      'Content-Type': MIME[extname(filePath)] || 'application/octet-stream',
+      'Cache-Control': isAsset ? 'public, max-age=31536000, immutable' : 'no-cache, no-store, must-revalidate'
+    });
     res.end(content);
   } catch (err) {
     console.error('Server error:', err);
