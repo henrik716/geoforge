@@ -109,43 +109,136 @@ const buildPropertySchema = (p: ModelProperty, model: DataModel): any => {
   return propSchema;
 };
 
-export const generateSchema = (model: DataModel) => {
-  const layers: any = {};
+// --- GeoJSON geometry schema helper ---
+const geoJsonGeometrySchema = (geometryType: GeometryType): any => {
+  const geomTypes: Record<string, any> = {
+    Point: { type: 'object', required: ['type', 'coordinates'], properties: { type: { const: 'Point' }, coordinates: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 3 } } },
+    LineString: { type: 'object', required: ['type', 'coordinates'], properties: { type: { const: 'LineString' }, coordinates: { type: 'array', items: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 3 } } } },
+    Polygon: { type: 'object', required: ['type', 'coordinates'], properties: { type: { const: 'Polygon' }, coordinates: { type: 'array', items: { type: 'array', items: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 3 } } } } },
+    MultiPoint: { type: 'object', required: ['type', 'coordinates'], properties: { type: { const: 'MultiPoint' }, coordinates: { type: 'array', items: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 3 } } } },
+    MultiLineString: { type: 'object', required: ['type', 'coordinates'], properties: { type: { const: 'MultiLineString' }, coordinates: { type: 'array', items: { type: 'array', items: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 3 } } } } },
+    MultiPolygon: { type: 'object', required: ['type', 'coordinates'], properties: { type: { const: 'MultiPolygon' }, coordinates: { type: 'array', items: { type: 'array', items: { type: 'array', items: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 3 } } } } } },
+    GeometryCollection: { type: 'object', required: ['type', 'geometries'], properties: { type: { const: 'GeometryCollection' }, geometries: { type: 'array', items: { type: 'object' } } } },
+  };
+  return geomTypes[geometryType] || null;
+};
+
+export const generateGeoJSONSchema = (model: DataModel): Record<string, any> => {
+  const result: Record<string, any> = {};
+
   model.layers.forEach(l => {
     const props: any = {};
     const required: string[] = [];
-    l.properties.forEach(p => { 
+    l.properties.forEach(p => {
       props[p.name || 'felt'] = buildPropertySchema(p, model);
       if (p.required) required.push(p.name);
     });
 
-    layers[l.name] = { 
-      type: "object",
-      properties: props
-    };
+    const propertiesSchema: any = { type: 'object', properties: props };
+    if (required.length > 0) propertiesSchema.required = required;
 
-    if (l.geometryType !== 'None') {
-        layers[l.name]["x-geometry-column"] = l.geometryColumnName;
-        layers[l.name]["x-geometry-type"] = l.geometryType;
-        layers[l.name]["x-styles"] = l.style;
+    const hasGeom = l.geometryType !== 'None';
+
+    if (!hasGeom) {
+      result[l.name] = {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        title: l.name,
+        type: 'object',
+        properties: props,
+        ...(required.length > 0 ? { required } : {}),
+        ...(l.description ? { description: l.description } : {}),
+      };
+      return;
     }
 
-    if (l.description) layers[l.name].description = l.description;
-    if (required.length > 0) layers[l.name].required = required;
+    const geomSchema = geoJsonGeometrySchema(l.geometryType);
+
+    const featureSchema: any = {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      title: l.name,
+      type: 'object',
+      required: ['type', 'geometry', 'properties'],
+      properties: {
+        type: { const: 'Feature' },
+        id: { type: ['string', 'number'] },
+        geometry: geomSchema
+          ? { oneOf: [geomSchema, { type: 'null' }] }
+          : { type: 'null' },
+        properties: propertiesSchema,
+      },
+    };
+
+    if (l.description) featureSchema.description = l.description;
+
+    result[l.name] = featureSchema;
   });
 
-  return { 
-    $schema: "http://json-schema.org/draft-07/schema#",
-    title: model.name, 
-    type: "object", 
-    "x-model-info": {
-      namespace: model.namespace || "undefined",
-      version: model.version || "1.0.0",
-      crs: model.crs || "EPSG:4326",
-      generatedAt: new Date().toISOString()
-    },
-    properties: layers
-  };
+  return result;
+};
+
+export const generateJSONFGSchema = (model: DataModel): Record<string, any> => {
+  const result: Record<string, any> = {};
+
+  model.layers.forEach(l => {
+    const props: any = {};
+    const required: string[] = [];
+    l.properties.forEach(p => {
+      props[p.name || 'felt'] = buildPropertySchema(p, model);
+      if (p.required) required.push(p.name);
+    });
+
+    const propertiesSchema: any = { type: 'object', properties: props };
+    if (required.length > 0) propertiesSchema.required = required;
+
+    const hasGeom = l.geometryType !== 'None';
+
+    if (!hasGeom) {
+      // Pure attribute table — plain JSON Schema, no Feature wrapper
+      result[l.name] = {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        title: l.name,
+        type: 'object',
+        properties: props,
+        ...(required.length > 0 ? { required } : {}),
+        ...(l.description ? { description: l.description } : {}),
+      };
+      return;
+    }
+
+    const crs = model.crs || 'EPSG:4326';
+    const isWgs84 = crs === 'EPSG:4326' || crs === 'CRS84';
+    const whereSchema = geoJsonGeometrySchema(l.geometryType);
+
+    const featureSchema: any = {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      title: l.name,
+      type: 'object',
+      conformsTo: '[OGC-21-045]',
+      featureType: l.name,
+      coordRefSys: `https://www.opengis.net/def/crs/${crs.replace(':', '/')}`,
+      required: ['type', 'geometry', 'properties'],
+      properties: {
+        type: { const: 'Feature' },
+        id: { type: ['string', 'number'] },
+        featureType: { const: l.name },
+        // geometry: GeoJSON (WGS84) — null if non-WGS84 CRS
+        geometry: isWgs84 && whereSchema
+          ? { oneOf: [whereSchema, { type: 'null' }] }
+          : { type: 'null' },
+        // where: primary geometry in declared CRS
+        where: whereSchema
+          ? { oneOf: [whereSchema, { type: 'null' }] }
+          : { type: 'null' },
+        properties: propertiesSchema,
+      },
+    };
+
+    if (l.description) featureSchema.description = l.description;
+
+    result[l.name] = featureSchema;
+  });
+
+  return result;
 };
 
 export const exportGeoPackage = async (model: DataModel, filename: string) => {
