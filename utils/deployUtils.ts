@@ -4,6 +4,14 @@ import {
 } from '../types';
 import { reprojectCoordinates } from './gdalService';
 import { hexToRgb } from './colorUtils';
+import { i18n } from '../i18n';
+import {
+  generateStacCatalog,
+  generateStacCollection,
+  generateStacLayerCatalog,
+  generateStacItemSnippet,
+  generateNginxStacConf,
+} from './stacUtils';
 
 // ============================================================
 // Helper: get table name for a layer (same logic as existing exports)
@@ -594,14 +602,13 @@ def get_since(args, layer_id):
 
 def get_pg_conn_string():
     """OGR connection string for ogr2ogr."""
-    return (
-        f"PG:host=${pgEnv.POSTGRES_HOST} "
-        f"port=${pgEnv.POSTGRES_PORT} "
-        f"dbname=${pgEnv.POSTGRES_DB} "
-        f"user=${pgEnv.POSTGRES_USER} "
-        f"password=${pgEnv.POSTGRES_PASSWORD} "
-        f"schemas=${pgEnv.POSTGRES_SCHEMA}"
-    )
+    host = os.environ.get("POSTGRES_HOST", "${pgEnv.POSTGRES_HOST}")
+    port = os.environ.get("POSTGRES_PORT", "${pgEnv.POSTGRES_PORT}")
+    dbname = os.environ.get("POSTGRES_DB", "${pgEnv.POSTGRES_DB}")
+    user = os.environ.get("POSTGRES_USER", "${pgEnv.POSTGRES_USER}")
+    password = os.environ.get("POSTGRES_PASSWORD", "${pgEnv.POSTGRES_PASSWORD}")
+    schema = os.environ.get("POSTGRES_SCHEMA", "${pgEnv.POSTGRES_SCHEMA}")
+    return f"PG:host={host} port={port} dbname={dbname} user={user} password={password} schemas={schema}"
 
 PG_CONN = get_pg_conn_string()
 
@@ -610,12 +617,12 @@ def pg_connect():
     """Direct psycopg2 connection for FID queries."""
     import psycopg2
     return psycopg2.connect(
-        host="${pgEnv.POSTGRES_HOST}",
-        port=${pgEnv.POSTGRES_PORT},
-        dbname="${pgEnv.POSTGRES_DB}",
-        user="${pgEnv.POSTGRES_USER}",
-        password="${pgEnv.POSTGRES_PASSWORD}",
-        options="-c search_path=${pgEnv.POSTGRES_SCHEMA}"
+        host=os.environ.get("POSTGRES_HOST", "${pgEnv.POSTGRES_HOST}"),
+        port=int(os.environ.get("POSTGRES_PORT", "${pgEnv.POSTGRES_PORT}")),
+        dbname=os.environ.get("POSTGRES_DB", "${pgEnv.POSTGRES_DB}"),
+        user=os.environ.get("POSTGRES_USER", "${pgEnv.POSTGRES_USER}"),
+        password=os.environ.get("POSTGRES_PASSWORD", "${pgEnv.POSTGRES_PASSWORD}"),
+        options=f"-c search_path={os.environ.get('POSTGRES_SCHEMA', '${pgEnv.POSTGRES_SCHEMA}')}"
     )
 
 
@@ -704,16 +711,20 @@ def export_${tbl}(since=None):
 
       if (tsCol) {
         script += `    # Step 4: Export inserts + updates (timestamp-based)
+    if inserted_pks:
+        pk_csv = ','.join(str(f) for f in sorted(inserted_pks))
+        change_type_expr = f'CASE WHEN "${pkCol}" IN ({pk_csv}) THEN \\'insert\\' ELSE \\'update\\' END'
+        pk_filter = f'OR "${pkCol}" IN ({pk_csv})'
+    else:
+        change_type_expr = "'update'"
+        pk_filter = ""
+
     sql_changes = f"""
-        SELECT *,
-            CASE
-                WHEN "${pkCol}" IN ({','.join(str(f) for f in inserted_pks)}) THEN 'insert'
-                ELSE 'update'
-            END as _change_type
+        SELECT *, {change_type_expr} as _change_type
         FROM "${sourceTable}"
         WHERE "${tsCol}" > '{since}'
-           OR "${pkCol}" IN ({','.join(str(f) for f in inserted_pks)})
-    """ if (inserted_pks or since) else None
+           {pk_filter}
+    """ if since else None
 
     has_changes = False
 
@@ -848,10 +859,14 @@ def export_${tbl}(since=None):
 
       if (tsCol) {
         script += `        # Changed + new features
-        pk_csv = ','.join(str(f) for f in inserted_pks) if inserted_pks else '-1'
+        if inserted_pks:
+            pk_csv = ','.join(str(f) for f in sorted(inserted_pks))
+            pk_filter = f'OR ${pkCol} IN ({pk_csv})'
+        else:
+            pk_filter = ""
         cursor.execute(f"""
             SELECT * FROM {full_table}
-            WHERE ${tsCol} > '{since}' OR ${pkCol} IN ({pk_csv})
+            WHERE ${tsCol} > '{since}' {pk_filter}
         """)
 `;
       } else {
@@ -1115,13 +1130,14 @@ services:
     compose += `
   # --- Delta File Download Server (Nginx) ---
   # Serves the generated .gpkg files as an auto-indexed web directory
+  # STAC catalog: http://localhost:\${DOWNLOAD_PORT:-8081}/stac/catalog.json
   downloads:
     image: nginx:alpine
     ports:
       - "\${DOWNLOAD_PORT:-8081}:80"
     volumes:
       - ./data/output:/usr/share/nginx/html:ro
-    command: /bin/sh -c "echo 'server { listen 80; location / { root /usr/share/nginx/html; autoindex on; autoindex_exact_size off; autoindex_localtime on; } }' > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+      - ./nginx-stac.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
   # --- Automated Delta GeoPackage Exporter ---
@@ -1170,76 +1186,89 @@ services:
 // ============================================================
 // Generate README for the deploy kit
 // ============================================================
-export const generateReadme = (model: DataModel, source: SourceConnection): string => {
+export const generateReadme = (model: DataModel, source: SourceConnection, lang: string = 'no'): string => {
+  const s = (i18n[lang as keyof typeof i18n] ?? i18n.no).readme;
   const isPg = source.type === 'postgis' || source.type === 'supabase';
   const isGpkg = source.type === 'geopackage';
   const hasWms = model.layers.some(l => l.geometryType !== 'None');
 
-  let md = `# ${model.name} — Deploy Kit\n\n`;
-  md += `Autogenerert fra GeoForge.\n\n`;
-  md += `## Datakilde: ${source.type}\n\n`;
-  md += `## Tjenester\n\n`;
-  md += `| Tjeneste | Port | URL |\n`;
+  let md = `# ${model.name} — ${s.deployKit}\n\n`;
+  md += `${s.generatedBy}\n\n`;
+  md += `## ${s.dataSource}: ${source.type}\n\n`;
+  md += `## ${s.services}\n\n`;
+  md += `| ${s.service} | ${s.port} | ${s.url} |\n`;
   md += `|----------|------|-----|\n`;
   md += `| OGC API - Features (pygeoapi) | 5000 | http://localhost:5000 |\n`;
   if (hasWms) {
-    md += `| WMS (QGIS Server) | 8080 | http://localhost:8080/ows/?SERVICE=WMS&REQUEST=GetCapabilities |\n`;
+    md += `| ${s.wmsService} | 8080 | http://localhost:8080/ows/?SERVICE=WMS&REQUEST=GetCapabilities |\n`;
   }
   if (!isGpkg) {
-    md += `| Delta Nedlastinger (Nginx) | 8081 | http://localhost:8081 |\n`;
+    md += `| ${s.deltaDownloads} | 8081 | http://localhost:8081 |\n`;
   }
   md += `\n`;
 
-  md += `## Kom i gang\n\n`;
+  md += `## ${s.gettingStarted}\n\n`;
   md += `\`\`\`bash\n`;
-  md += `# 1. Kopier og oppdater miljøvariabler\n`;
+  md += `${s.step1CopyEnv}\n`;
   md += `cp .env.template .env\n`;
   md += `nano .env\n\n`;
 
   if (isGpkg) {
     const gpkgName = getGpkgFilename(model, source);
-    md += `# 2. Legg inn data\n`;
-    md += `Plasser din GeoPackage-fil (\`${gpkgName}\`) i \`./data\` mappen.\n\n`;
-    md += `# 3. Start tjenestene\n`;
+    md += `${s.step2AddData}\n`;
+    md += `${s.addDataHint.replace('{filename}', gpkgName)}\n\n`;
+    md += `${s.step3Start}\n`;
   } else if (source.type === 'databricks') {
-    md += `# 2. Kjør initial eksport (kun Databricks)\n`;
+    md += `${s.step2Databricks}\n`;
     md += `pip install databricks-sql-connector geopandas\n`;
     md += `docker compose --profile setup run --rm initial-export\n\n`;
-    md += `# 3. Start tjenestene\n`;
+    md += `${s.step3Start}\n`;
   } else {
-    md += `# 2. Start tjenestene\n`;
+    md += `${s.step2Start}\n`;
   }
 
   md += `docker compose up -d\n`;
   md += `\`\`\`\n\n`;
 
   if (!isGpkg) {
-    md += `## Delta-eksport (Automatisert)\n\n`;
-    md += `Delta-eksporten kjører automatisk i bakgrunnen og håndterer **inserts, updates og deletes**.\n`;
-    md += `Intervallet styres av \`SYNC_INTERVAL_SECONDS\` i \`.env\`-filen (standard er 86400 sekunder / 24 timer).\n\n`;
-    md += `Nye \`.gpkg\`-filer blir automatisk tilgjengelige for nedlasting på **http://localhost:8081**.\n\n`;
+    md += `## ${s.deltaExport}\n\n`;
+    md += `${s.deltaDesc}\n`;
+    md += `${s.deltaInterval}\n\n`;
+    md += `${s.deltaDownloadHint}\n\n`;
+    md += `${s.stacAvailable}\n\n`;
 
-    md += `### Hva delta-filen inneholder\n\n`;
-    md += `| \_change\_type | Beskrivelse |\n`;
+    md += `### ${s.deltaContents}\n\n`;
+    md += `| ${s.changeType} | ${s.description} |\n`;
     md += `|---------------|-------------|\n`;
-    md += `| \`insert\` | Nye features (FID finnes ikke i forrige kjøring) |\n`;
-    md += `| \`update\` | Endrede features (timestamp er nyere, krever timestamp-kolonne) |\n`;
-    md += `| \`delete\` | Slettede features (FID fantes forrige gang, men er nå borte) |\n\n`;
-    md += `Slettede features lagres i et eget lag (\`<lagnavn>_deletes\`) med kun fid og \_change\_type.\n\n`;
+    md += `| \`insert\` | ${s.insertDesc} |\n`;
+    md += `| \`update\` | ${s.updateDesc} |\n`;
+    md += `| \`delete\` | ${s.deleteDesc} |\n\n`;
+    md += `${s.deletesStoredHint}\n\n`;
+
+    md += `### ${s.deltaHowItWorksTitle}\n\n`;
+    md += `${s.deltaHowItWorks1}\n\n`;
+    md += `${s.deltaHowItWorks2}\n\n`;
+    md += `> **Note:** ${s.deltaTimestampNote}\n\n`;
+    md += `${s.deltaManualTrigger}\n`;
+    md += `\`\`\`bash\n`;
+    md += `${s.deltaManualFull}\n`;
+    md += `${s.deltaManualDelta}\n`;
+    md += `${s.deltaManualDate}\n`;
+    md += `\`\`\`\n\n`;
   }
 
-  md += `## Filer\n\n`;
-  md += `| Fil | Beskrivelse |\n`;
+  md += `## ${s.files}\n\n`;
+  md += `| ${s.file} | ${s.description} |\n`;
   md += `|-----|-------------|\n`;
-  md += `| \`docker-compose.yml\` | Starter alle tjenester |\n`;
-  md += `| \`pygeoapi-config.yml\` | ${isPg ? 'Kobler direkte til PostGIS' : 'Leser fra GeoPackage-fil'} |\n`;
+  md += `| \`docker-compose.yml\` | ${s.dockerComposeFile} |\n`;
+  md += `| \`pygeoapi-config.yml\` | ${isPg ? s.pygeoapiPgFile : s.pygeoapiGpkgFile} |\n`;
   if (hasWms) {
-    md += `| \`project.qgs\` | QGIS-prosjekt med lag og stil |\n`;
+    md += `| \`project.qgs\` | ${s.qgisProjectFile} |\n`;
   }
   if (!isGpkg) {
-    md += `| \`delta_export.py\` | Script for inkrementell GeoPackage-eksport |\n`;
+    md += `| \`delta_export.py\` | ${s.deltaScriptFile} |\n`;
   }
-  md += `| \`.env.template\` | Mal for tilkoblingsdetaljer — kopier til .env og fyll inn |\n`;
+  md += `| \`.env.template\` | ${s.envTemplateFile} |\n`;
 
   return md;
 };
@@ -1760,17 +1789,19 @@ ${hasWms ? `
 const generateReadmeForTarget = (
   model: DataModel,
   source: SourceConnection,
-  target: DeployTarget
+  target: DeployTarget,
+  lang: string = 'no'
 ): string => {
+  const s = (i18n[lang as keyof typeof i18n] ?? i18n.no).readme;
   const slug = model.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const isGpkg = source.type === 'geopackage';
   const hasWms = model.layers.some(l => l.geometryType !== 'None');
 
   const targetNames: Record<DeployTarget, string> = {
-    'docker-compose': 'Docker Compose',
-    'fly': 'Fly.io',
-    'railway': 'Railway',
-    'ghcr': 'GitHub Container Registry',
+    'docker-compose': s.targetDockerCompose,
+    'fly': s.targetFly,
+    'railway': s.targetRailway,
+    'ghcr': s.targetGhcr,
   };
 
   // QGIS Server 3.x serves at /ows/ by default
@@ -1782,67 +1813,68 @@ const generateReadmeForTarget = (
   };
   const wmsUrl = wmsUrls[target];
 
-  let md = `# ${model.name} — Deploy Kit\n\n`;
-  md += `Autogenerert fra GeoForge · Deployment target: **${targetNames[target]}**\n\n`;
+  let md = `# ${model.name} — ${s.deployKit}\n\n`;
+  md += `${s.generatedByTarget} **${targetNames[target]}**\n\n`;
 
   // Services table
-  md += `## Tjenester\n\n`;
-  md += `| Tjeneste | Beskrivelse | URL |\n`;
+  md += `## ${s.services}\n\n`;
+  md += `| ${s.service} | ${s.description} | ${s.url} |\n`;
   md += `|----------|-------------|-----|\n`;
   md += `| pygeoapi | OGC API – Features | ${target === 'docker-compose' ? 'http://localhost:5000' : target === 'fly' ? `https://${slug}-pygeoapi.fly.dev` : target === 'railway' ? 'https://\\<app\\>.up.railway.app' : 'http://localhost:5000'} |\n`;
   if (hasWms) {
-    md += `| QGIS Server | WMS/WFS kartlag | ${wmsUrl}?SERVICE=WMS&REQUEST=GetCapabilities |\n`;
+    md += `| QGIS Server | ${s.wmsLayers} | ${wmsUrl}?SERVICE=WMS&REQUEST=GetCapabilities |\n`;
   }
   md += `\n`;
 
   if (target === 'docker-compose') {
-    return md + generateReadme(model, source).substring(generateReadme(model, source).indexOf('## Kom i gang'));
+    const readmeFull = generateReadme(model, source, lang);
+    const anchor = `## ${s.gettingStarted}`;
+    return md + readmeFull.substring(readmeFull.indexOf(anchor));
   }
 
   if (target === 'fly') {
-    md += `## Kom i gang med Fly.io\n\n`;
-    md += `### Forutsetninger\n\n`;
+    md += `## ${s.gettingStartedFly}\n\n`;
+    md += `### ${s.prerequisites}\n\n`;
     md += `1. Installer [flyctl](https://fly.io/docs/getting-started/installing-flyctl/)\n`;
     md += `2. Logg inn: \`fly auth login\`\n\n`;
-    md += `### Deploy\n\n`;
+    md += `### ${s.deploy}\n\n`;
     md += `\`\`\`bash\n`;
-    md += `# Første gang — opprett appene\n`;
+    md += `${s.firstTime}\n`;
     md += `fly launch --config fly.toml --copy-config --no-deploy\n`;
     if (hasWms) {
       md += `fly launch --config fly.qgis.toml --copy-config --no-deploy\n`;
     }
     md += `\n`;
     if (isGpkg) {
-      const gpkgName = getGpkgFilename(model, source);
-      md += `# Last opp GeoPackage-data\n`;
+      md += `${s.uploadGpkgData}\n`;
       md += `fly volumes create geodata --region ams --size 1 -a ${slug}-pygeoapi\n`;
-      md += `# Kopier filen inn (bruk fly ssh console + scp, eller bak inn i imaget)\n\n`;
+      md += `${s.copyFileHint}\n\n`;
     }
-    md += `# Deploy pygeoapi\n`;
+    md += `${s.deployPygeoapi}\n`;
     md += `fly deploy --config fly.toml\n`;
     if (hasWms) {
-      md += `\n# Deploy QGIS Server\n`;
+      md += `\n${s.deployQgis}\n`;
       md += `fly deploy --config fly.qgis.toml\n`;
     }
     md += `\`\`\`\n\n`;
-    md += `> **Merk:** \`PYGEOAPI_SERVER_URL\` og \`QGIS_SERVER_SERVICE_URL\` er forhåndsutfylt i \`fly.toml\` / \`fly.qgis.toml\` basert på det genererte appnavnet. Oppdater disse om du setter opp et eget domene.\n\n`;
-    md += `### Automatisk deploy\n\n`;
-    md += `Legg til \`FLY_API_TOKEN\` som GitHub Secret. GitHub Actions deployer automatisk ved push til main.\n\n`;
-    md += `Hent token: \`fly tokens create deploy -x 999999h\`\n\n`;
+    md += `${s.flyNote}\n\n`;
+    md += `### ${s.autoDeployTitle}\n\n`;
+    md += `${s.autoDeployFly}\n\n`;
+    md += `${s.getToken}\n\n`;
   }
 
   if (target === 'railway') {
-    md += `## Kom i gang med Railway\n\n`;
-    md += `### Steg\n\n`;
-    md += `1. Gå til [railway.app](https://railway.app) og opprett en konto\n`;
-    md += `2. Klikk **"New Project"** → **"Deploy from GitHub Repo"**\n`;
-    md += `3. Velg dette repoet\n`;
-    md += `4. Railway oppdager \`Dockerfile\` automatisk og starter deploy\n\n`;
-    md += `### Miljøvariabler\n\n`;
-    md += `Sett disse under **Variables** i Railway dashboard:\n\n`;
-    md += `| Variabel | Verdi |\n`;
+    md += `## ${s.gettingStartedRailway}\n\n`;
+    md += `### ${s.steps}\n\n`;
+    md += `${s.railwayStep1}\n`;
+    md += `${s.railwayStep2}\n`;
+    md += `${s.railwayStep3}\n`;
+    md += `${s.railwayStep4}\n\n`;
+    md += `### ${s.envVars}\n\n`;
+    md += `${s.railwayEnvDesc}\n\n`;
+    md += `| ${s.variable} | ${s.value} |\n`;
     md += `|----------|-------|\n`;
-    md += `| \`PYGEOAPI_SERVER_URL\` | \`https://<din-app>.up.railway.app\` (kopier fra Railway dashboard) |\n`;
+    md += `| \`PYGEOAPI_SERVER_URL\` | ${s.railwayPygeoapiDesc} |\n`;
     if (hasWms) {
       md += `| \`QGIS_SERVER_PUBLIC_URL\` | \`https://<qgis-service>.up.railway.app/ows/\` |\n`;
     }
@@ -1850,74 +1882,108 @@ const generateReadmeForTarget = (
       const envLines = generateEnvFile(source).split('\n').filter(l => l.includes('=') && !l.startsWith('#') && !l.startsWith('PYGEOAPI') && !l.startsWith('PORT') && !l.startsWith('QGIS'));
       envLines.forEach(l => {
         const [k] = l.split('=');
-        md += `| \`${k}\` | *(din verdi)* |\n`;
+        md += `| \`${k}\` | ${s.yourValue} |\n`;
       });
     }
     md += `\n`;
-    md += `> **Merk:** Railway setter \`PORT\` automatisk — ikke overstyr denne.\n\n`;
+    md += `${s.railwayNote}\n\n`;
     if (hasWms) {
-      md += `### QGIS Server (WMS/WFS)\n\n`;
-      md += `Railway deployer én tjeneste per repo som standard. For å kjøre QGIS Server i tillegg:\n\n`;
-      md += `1. Klikk **"+ New"** → **"GitHub Repo"** i samme prosjekt\n`;
-      md += `2. Velg dette repoet igjen\n`;
-      md += `3. Under **Settings → Build**, sett Dockerfile path til \`Dockerfile.qgis\`\n`;
-      md += `4. Under **Settings → Deploy**, sett health check path til \`/ows/?SERVICE=WMS&REQUEST=GetCapabilities\` og timeout til **300s**\n`;
-      md += `5. Bekreft at porten vises som **80** under **Settings → Networking**\n\n`;
+      md += `### ${s.qgisServerSection}\n\n`;
+      md += `${s.railwayQgisDesc}\n\n`;
+      md += `${s.railwayQgisStep1}\n`;
+      md += `${s.railwayQgisStep2}\n`;
+      md += `${s.railwayQgisStep3}\n`;
+      md += `${s.railwayQgisStep4}\n`;
+      md += `${s.railwayQgisStep5}\n\n`;
     }
     if (isGpkg) {
-      md += `### Data\n\n`;
-      md += `GeoPackage-filen er bakt inn i Docker-imaget under build.\n`;
-      md += `For å oppdatere data: legg ny fil i \`data/\`-mappen og push til GitHub.\n\n`;
+      md += `### ${s.dataSection}\n\n`;
+      md += `${s.gpkgDataDesc}\n`;
+      md += `${s.gpkgUpdateHint}\n\n`;
     }
-    md += `### Automatisk deploy\n\n`;
-    md += `Railway deployer automatisk ved push til main. Ingen GitHub Actions nødvendig.\n\n`;
+    md += `### ${s.autoDeployTitle}\n\n`;
+    md += `${s.autoDeployRailway}\n\n`;
   }
 
   if (target === 'ghcr') {
-    md += `## Container Registry\n\n`;
-    md += `Denne konfigurasjonen bygger Docker-images og pusher til GitHub Container Registry (ghcr.io).\n`;
-    md += `Du (eller driftsorganisasjonen) kan deretter pulle og kjøre bildene hvor som helst.\n\n`;
-    md += `### Images\n\n`;
-    md += `| Image | Beskrivelse |\n`;
+    md += `## ${s.containerRegistry}\n\n`;
+    md += `${s.ghcrDesc}\n`;
+    md += `${s.ghcrDesc2}\n\n`;
+    md += `### ${s.images}\n\n`;
+    md += `| ${s.image} | ${s.description} |\n`;
     md += `|-------|-------------|\n`;
-    md += `| \`ghcr.io/<owner>/${slug}:latest\` | pygeoapi (OGC API) |\n`;
+    md += `| \`ghcr.io/<owner>/${slug}:latest\` | ${s.ghcrPygeoapiImage} |\n`;
     if (hasWms) {
-      md += `| \`ghcr.io/<owner>/${slug}-qgis:latest\` | QGIS Server (WMS/WFS) |\n`;
+      md += `| \`ghcr.io/<owner>/${slug}-qgis:latest\` | ${s.ghcrQgisImage} |\n`;
     }
     md += `\n`;
-    md += `### Kjøre lokalt\n\n`;
+    md += `### ${s.runLocally}\n\n`;
     md += `\`\`\`bash\n`;
     md += `docker pull ghcr.io/<owner>/${slug}:latest\n`;
     md += `docker run -p 5000:80 \\\n`;
     md += `  -e PYGEOAPI_SERVER_URL=http://localhost:5000 \\\n`;
     md += `  ghcr.io/<owner>/${slug}:latest\n`;
     md += `\`\`\`\n\n`;
-    md += `### Bruke med Docker Compose\n\n`;
+    md += `### ${s.useWithCompose}\n\n`;
     md += `\`\`\`bash\n`;
     md += `docker compose up -d\n`;
     md += `\`\`\`\n\n`;
-    md += `### Automatisk bygg\n\n`;
-    md += `GitHub Actions bygger og pusher nye images automatisk ved push til main.\n\n`;
+    md += `### ${s.autoBuild}\n\n`;
+    md += `${s.autoBuildDesc}\n\n`;
+  }
+
+  // Delta export section (for non-docker-compose targets — docker-compose gets this via generateReadme)
+  if (!isGpkg && target !== 'docker-compose') {
+    md += `## ${s.deltaExport}\n\n`;
+    md += `${s.deltaDesc}\n\n`;
+    md += `> **Note:** ${s.deltaTimestampNote}\n\n`;
+    md += `### ${s.deltaHowItWorksTitle}\n\n`;
+    md += `${s.deltaHowItWorks1}\n\n`;
+    md += `${s.deltaManualTrigger}\n`;
+    md += `\`\`\`bash\n`;
+    md += `${s.deltaManualFull}\n`;
+    md += `${s.deltaManualDelta}\n`;
+    md += `${s.deltaManualDate}\n`;
+    md += `\`\`\`\n\n`;
   }
 
   // Files table
-  md += `## Filer\n\n`;
-  md += `| Fil | Beskrivelse |\n`;
+  md += `## ${s.files}\n\n`;
+  md += `| ${s.file} | ${s.description} |\n`;
   md += `|-----|-------------|\n`;
-  md += `| \`model.json\` | Datamodell (GeoForge) |\n`;
-  md += `| \`Dockerfile\` | pygeoapi container |\n`;
-  md += `| \`pygeoapi-config.yml\` | OGC API-konfigurasjon |\n`;
+  md += `| \`model.json\` | ${s.modelJsonFile} |\n`;
+  md += `| \`Dockerfile\` | ${s.dockerfileFile} |\n`;
+  md += `| \`pygeoapi-config.yml\` | ${s.pygeoapiConfigFile} |\n`;
   if (hasWms) {
-    md += `| \`Dockerfile.qgis\` | QGIS Server container |\n`;
-    md += `| \`project.qgs\` | QGIS-prosjekt med lag og stil |\n`;
+    md += `| \`Dockerfile.qgis\` | ${s.dockerfileQgisFile} |\n`;
+    md += `| \`project.qgs\` | ${s.qgisProjectFile} |\n`;
   }
-  if (target === 'docker-compose') md += `| \`docker-compose.yml\` | Starter alle tjenester |\n`;
-  if (target === 'fly') md += `| \`fly.toml\` | Fly.io-konfigurasjon (pygeoapi) |\n`;
-  if (target === 'fly' && hasWms) md += `| \`fly.qgis.toml\` | Fly.io-konfigurasjon (QGIS) |\n`;
-  if (target === 'railway') md += `| \`railway.json\` | Railway-konfigurasjon (pygeoapi) |\n`;
-  if (target === 'railway' && hasWms) md += `| \`railway.qgis.json\` | Railway-konfigurasjon (QGIS Server) |\n`;
-  md += `| \`.env.template\` | Mal for miljøvariabler |\n`;
-  if (!isGpkg) md += `| \`delta_export.py\` | Inkrementell GeoPackage-eksport |\n`;
+  if (target === 'docker-compose') md += `| \`docker-compose.yml\` | ${s.dockerComposeFile} |\n`;
+  if (target === 'fly') md += `| \`fly.toml\` | ${s.flyTomlFile} |\n`;
+  if (target === 'fly' && hasWms) md += `| \`fly.qgis.toml\` | ${s.flyQgisTomlFile} |\n`;
+  if (target === 'railway') md += `| \`railway.json\` | ${s.railwayJsonFile} |\n`;
+  if (target === 'railway' && hasWms) md += `| \`railway.qgis.json\` | ${s.railwayQgisJsonFile} |\n`;
+  md += `| \`.env.template\` | ${s.envTemplateShort} |\n`;
+  if (!isGpkg) md += `| \`delta_export.py\` | ${s.deltaScriptFile} |\n`;
+  if (!isGpkg) md += `| \`nginx-stac.conf\` | ${s.nginxStacConfFile} |\n`;
+
+  // STAC catalog section
+  if (!isGpkg) {
+    const modelId = model.id || model.name.toLowerCase().replace(/\s+/g, '-');
+    const downloadBase = target === 'fly' ? `https://${slug}-downloads.fly.dev` : 'https://<downloads-url>';
+    md += `\n## ${s.stacCatalogSection}\n\n`;
+    md += `| ${s.resource} | ${s.url} |\n`;
+    md += `|---------|-----|\n`;
+    md += `| ${s.stacRootCatalog} | ${downloadBase}/stac/catalog.json |\n`;
+    md += `| ${s.stacCollectionLabel} | ${downloadBase}/stac/collections/${modelId}/collection.json |\n`;
+    model.layers
+      .filter(l => !l.isAbstract)
+      .forEach(layer => {
+        const tbl = layer.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        md += `| ${layer.name} items | ${downloadBase}/stac/${tbl}/catalog.json |\n`;
+      });
+    md += `\n${s.stacItemsNote}\n`;
+  }
 
   return md;
 };
@@ -1942,7 +2008,7 @@ export const generateDeployFiles = async (
     'pygeoapi-config.yml': await generatePygeoapiConfig(model, source, lang),
     '.env.template': generateEnvFile(source),
     '.gitignore': '.env\ndata/\n*.gpkg\n__pycache__/\n',
-    'README.md': generateReadmeForTarget(model, source, target),
+    'README.md': generateReadmeForTarget(model, source, target, lang),
     '.github/workflows/deploy.yml': generateWorkflowForTarget(model, source, target),
   };
 
@@ -1954,9 +2020,23 @@ export const generateDeployFiles = async (
     }
   }
 
-  // Delta script for database sources
+  // Delta script + STAC helpers for database sources
   if (!isGpkg) {
-    files['delta_export.py'] = generateDeltaScript(model, source);
+    const modelId = model.id || model.name.toLowerCase().replace(/\s+/g, '-');
+    files['delta_export.py'] = generateDeltaScript(model, source) + '\n\n' + generateStacItemSnippet(model, source);
+
+    // STAC static catalog structure
+    files['data/output/stac/catalog.json'] = generateStacCatalog(model);
+    files[`data/output/stac/collections/${modelId}/collection.json`] = generateStacCollection(model, source);
+    model.layers
+      .filter(l => !l.isAbstract)
+      .forEach(layer => {
+        const tbl = layer.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        files[`data/output/stac/${tbl}/catalog.json`] = generateStacLayerCatalog(layer, model);
+      });
+
+    // Nginx config with correct MIME types
+    files['nginx-stac.conf'] = generateNginxStacConf();
   }
 
   // Target-specific files
