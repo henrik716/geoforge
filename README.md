@@ -1,4 +1,4 @@
-# Waystones
+# GeoForge
 
 **Design, model, and deploy geospatial data services — no backend expertise required.**
 
@@ -10,7 +10,7 @@
 
 ---
 
-Waystones is a browser-based tool for designing geospatial data models and generating production-ready [pygeoapi](https://pygeoapi.io) and QGIS Server deployments. Go from a raw GeoPackage file or a blank canvas to a standards-compliant OGC API and WMS in minutes.
+GeoForge is a browser-based tool for designing geospatial data models and generating production-ready [pygeoapi](https://pygeoapi.io) and QGIS Server deployments. Go from a raw GeoPackage file or a blank canvas to a standards-compliant OGC API and WMS in minutes.
 
 ## Features
 
@@ -23,7 +23,7 @@ Build data models with layers, fields, and constraints through a visual editor:
 
 ### Quick Publish
 The fastest path from data to a live service:
-1. Drop a GeoPackage file — Waystones auto-infers the data structure
+1. Drop a GeoPackage file — GeoForge auto-infers the data structure
 2. Select which tables to publish and configure symbology (colors, icons, line styles)
 3. Fill in dataset metadata (title, description, contact, license, spatial/temporal extent)
 4. Publish directly to GitHub — deployment is automatic
