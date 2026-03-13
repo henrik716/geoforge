@@ -503,6 +503,7 @@ export const en = {
   },
   constraints: {
     title: "Constraints",
+    multiplicity: "Multiplicity",
     min: "Minimum",
     max: "Maximum",
     minLength: "Min length",

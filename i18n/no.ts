@@ -503,6 +503,7 @@ export const no = {
   },
   constraints: {
     title: "Restriksjoner",
+    multiplicity: "Multiplisitet",
     min: "Minimumsverdi",
     max: "Maksimumsverdi",
     minLength: "Minimumslengde",
