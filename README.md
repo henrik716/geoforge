@@ -1,4 +1,4 @@
-# GeoForge
+# Waystones
 
 **Design, model, and deploy geospatial data services — no backend expertise required.**
 
@@ -10,7 +10,7 @@
 
 ---
 
-GeoForge is a browser-based tool for designing geospatial data models and generating production-ready [pygeoapi](https://pygeoapi.io) deployments. Go from a raw GeoPackage file or a blank canvas to a standards-compliant OGC API in minutes.
+Waystones is a browser-based tool for designing geospatial data models and generating production-ready [pygeoapi](https://pygeoapi.io) and QGIS Server deployments. Go from a raw GeoPackage file or a blank canvas to a standards-compliant OGC API and WMS in minutes.
 
 ## Features
 
@@ -23,7 +23,7 @@ Build data models with layers, fields, and constraints through a visual editor:
 
 ### Quick Publish
 The fastest path from data to a live service:
-1. Drop a GeoPackage file — GeoForge auto-infers the data structure
+1. Drop a GeoPackage file — Waystones auto-infers the data structure
 2. Select which tables to publish and configure symbology (colors, icons, line styles)
 3. Fill in dataset metadata (title, description, contact, license, spatial/temporal extent)
 4. Publish directly to GitHub — deployment is automatic
@@ -36,10 +36,10 @@ Migrate and transform existing GIS data:
 
 ### Deploy Panel
 Configure and export production deployments:
-- Connect to PostGIS, Supabase, Databricks, or local GeoPackage data sources
+- Connect to PostGIS, Supabase, or local GeoPackage data sources
 - Map model layers to source tables
 - Export deployment kits with Docker Compose, Fly.io, Railway, or GitHub Container Registry configurations
-- Auto-generate complete pygeoapi configuration with OGC API – Features, WMS, and WFS support
+- Auto-generate complete pygeoapi and QGIS Server configurations with OGC API – Features and WMS support
 - Push to GitHub with pull request support for collaborative review workflows
 
 ### AI Assistant
@@ -104,3 +104,7 @@ A completed GeoForge model generates:
 ## Language Support
 
 The UI is available in **English** and **Norwegian**.
+
+## License
+
+- **Open Source — AGPL v3**: Free to use, modify, and distribute under the terms of the [GNU Affero General Public License v3](LICENSE). If you use GeoForge as part of a network service, you must make your modifications available under the same license.
