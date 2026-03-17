@@ -149,14 +149,9 @@ const ValidationBar: React.FC<ValidationBarProps> = ({
 
   return (
     <div className="mb-4 bg-white border border-slate-200 rounded-[22px] overflow-hidden shadow-sm transition-all">
-      <div className="flex items-center w-full">
-        {/* Accordion toggle button — takes remaining space */}
-        <button
-          onClick={onToggle}
-          aria-expanded={isExpanded}
-          aria-controls="validation-issue-list"
-          className="flex-1 flex items-center gap-2 px-4 py-3 hover:bg-slate-50 transition-colors text-left"
-        >
+      <div className="w-full hover:bg-slate-50 transition-colors">
+        <div className="flex items-center w-full px-4 py-3 gap-2">
+          {/* Badge container — errors and warnings */}
           <div className="flex flex-wrap gap-2">
             {errorCount > 0 && (
               <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-100 text-rose-700 rounded-lg px-2.5 py-1 text-[10px] font-black">
@@ -188,35 +183,51 @@ const ValidationBar: React.FC<ValidationBarProps> = ({
               {lang === 'no' ? 'Validering av modellen' : 'Model validation'}
             </span>
           </div>
-          {isExpanded ? (
-            <ChevronUp size={16} className="text-slate-400 shrink-0" />
-          ) : (
-            <ChevronDown size={16} className="text-slate-400 shrink-0" />
-          )}
-        </button>
 
-        {/* Hints toggle button — sibling, not nested */}
-        {hintCount > 0 && (
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Hints toggle — expands panel AND toggles hints visibility */}
+          {hintCount > 0 && (
+            <button
+              onClick={() => {
+                if (!isExpanded) onToggle();
+                onToggleHints();
+              }}
+              aria-pressed={showHints}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-black transition-all ${
+                showHints
+                  ? 'bg-sky-100 border border-sky-200 text-sky-700'
+                  : 'bg-sky-50 border border-sky-100 text-sky-600'
+              }`}
+            >
+              <Lightbulb size={11} className="shrink-0" />
+              {hintCount}{' '}
+              {lang === 'no'
+                ? hintCount === 1
+                  ? 'tips'
+                  : 'tips'
+                : hintCount === 1
+                  ? 'hint'
+                  : 'hints'}
+            </button>
+          )}
+
+          {/* Expand/collapse chevron and label — clickable to toggle expand */}
           <button
-            onClick={onToggleHints}
-            aria-pressed={showHints}
-            className={`mr-3 flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-black transition-all ${
-              showHints
-                ? 'bg-sky-100 border border-sky-200 text-sky-700'
-                : 'bg-sky-50 border border-sky-100 text-sky-600 hover:bg-sky-100'
-            }`}
+            onClick={onToggle}
+            aria-expanded={isExpanded}
+            aria-controls="validation-issue-list"
+            className="ml-2 flex items-center gap-1.5 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+            title={isExpanded ? 'Collapse' : 'Expand'}
           >
-            <Lightbulb size={11} className="shrink-0" />
-            {hintCount}{' '}
-            {lang === 'no'
-              ? hintCount === 1
-                ? 'tips'
-                : 'tips'
-              : hintCount === 1
-                ? 'hint'
-                : 'hints'}
+            {isExpanded ? (
+              <ChevronUp size={18} className="shrink-0" />
+            ) : (
+              <ChevronDown size={18} className="shrink-0" />
+            )}
           </button>
-        )}
+        </div>
       </div>
 
       {isExpanded && (
