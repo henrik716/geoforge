@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import type { Translations } from '../i18n/index';
 import { HelpCircle, Hammer, Sparkles, X, Activity, Check, AlertTriangle } from 'lucide-react';
 import { Language } from '../types';
 import { AiProvider, getProvider, setProvider, getApiKey, saveApiKey, clearApiKey, getTrialUsesLeft } from '../utils/aiService';
@@ -7,7 +8,7 @@ import AiConfigModal from './ai/AiConfigModal';
 import AiErrorHandler from './ai/AiErrorHandler';
 
 const Header: React.FC<{
-  t: any;
+  t: Translations;
   lang: Language;
   onLangChange: (lang: Language) => void;
   onShowGuide: () => void;

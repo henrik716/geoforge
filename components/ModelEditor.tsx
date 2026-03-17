@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import type { Translations } from '../i18n/index';
 import {
   Plus, Trash2, Layers, LayoutList, MapPin, Globe, Palette, MousePointer2,
   GitCommit, Square, Hash, Shapes, Package,
@@ -13,8 +14,8 @@ import { compareModels, getStructuredChanges } from '../utils/diffUtils';
 import { fetchModelHistory, fetchModelAtCommit, CommitInfo } from '../utils/githubService';
 import { useDragAndDropReorder } from '../hooks/useDragAndDropReorder';
 import { useRenderingOrder } from '../hooks/useRenderingOrder';
-import { useAiContext } from '../hooks/useAiContext';
-import { generateModelAbstract, generateLayerDescription, hasApiKey } from '../utils/aiService';
+import { useAiContext } from '../contexts/AiContext';
+import { generateModelAbstract, generateLayerDescription } from '../utils/aiService';
 import { sanitizeTechnicalName } from '../utils/nameSanitizer';
 import PropertyEditor from './PropertyEditor';
 import StylePreview from './StylePreview';
@@ -32,7 +33,7 @@ interface ModelEditorProps {
   githubConfig: { token: string; repo: string; path: string; branch: string };
   onUpdate: (model: DataModel) => void;
   onSetBaseline: (model: DataModel) => void;
-  t: any;
+  t: Translations;
   lang: string;
 }
 
@@ -469,12 +470,7 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
   }));
 
   const handleGenerateDatasetDescription = () => {
-    if (!hasApiKey()) {
-      window.dispatchEvent(new CustomEvent('ai-configure-required', {
-        detail: { operation: 'abstract' }
-      }));
-      return;
-    }
+    if (!aiContext.ensureApiKey('abstract')) return;
 
     aiContext.setLoading('abstract', 'Generating dataset description…');
     generateModelAbstract({ modelName: model.name, layers: getLayersForAi(), lang }).then(result => {
@@ -488,12 +484,7 @@ const ModelEditor: React.FC<ModelEditorProps> = ({ model, baselineModel, githubC
   const handleGenerateLayerDescription = () => {
     if (!activeLayer) return;
 
-    if (!hasApiKey()) {
-      window.dispatchEvent(new CustomEvent('ai-configure-required', {
-        detail: { operation: 'description' }
-      }));
-      return;
-    }
+    if (!aiContext.ensureApiKey('description')) return;
 
     aiContext.setLoading('description', 'Generating layer description…');
     const layerProperties = activeLayer.properties.map(p => ({ name: p.name, type: p.fieldType.kind === 'primitive' ? p.fieldType.baseType : p.fieldType.kind }));
