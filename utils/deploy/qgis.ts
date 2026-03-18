@@ -315,35 +315,32 @@ export const generateFlyQgisToml = (
   model: DataModel,
   source: SourceConnection
 ): string => {
-  const modelName = model.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
-  return `app = "${modelName}-qgis"
-primary_region = "arn"
+  const slug = model.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return `app = "${slug}-qgis"
+primary_region = "ams"
 
 [build]
-dockerfile = "Dockerfile.qgis"
+  dockerfile = "Dockerfile.qgis"
 
 [env]
-QGIS_PROJECT_FILE = "/io/project.qgs"
+  QGIS_SERVER_SERVICE_URL = "https://${slug}-qgis.fly.dev/ows/"
 
-[[services]]
-internal_port = 80
-processes = ["app"]
-auto_stop_machines = true
+[http_service]
+  internal_port = 80
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
 
-  [services.concurrency]
-  type = "connections"
-  hard_limit = 1000
-  soft_limit = 100
-
-  [[services.ports]]
-  port = 80
-  handlers = ["http"]
-
-  [[services.tcp_checks]]
-  grace_period = "30s"
-  interval = "15s"
-  timeout = "5s"
-`;
+[[vm]]
+  memory = "1024mb"
+  cpu_kind = "shared"
+  cpus = 1
+${source.type === 'geopackage' ? `
+[mounts]
+  source = "geodata"
+  destination = "/data"
+` : ''}`;
 };
 
 // ============================================================
