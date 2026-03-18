@@ -293,20 +293,17 @@ export const generateQgisDockerfile = (
   model: DataModel,
   source: SourceConnection
 ): string => {
+  const isGpkg = source.type === 'geopackage';
   return `FROM qgis/qgis-server:ltr
 
-COPY project.qgs /io/project.qgs
-COPY data /data
-
+COPY project.qgs /data/project.qgs
+${isGpkg ? 'COPY data/ /data/' : ''}
 RUN chmod -R 777 /data
 
-ENV QGIS_PROJECT_FILE=/io/project.qgs
+ENV QGIS_PROJECT_FILE=/data/project.qgs
 
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \\
-  CMD curl -f "http://localhost:80/ows/?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetCapabilities" || exit 1
-
+# QGIS_SERVER_SERVICE_URL is set at runtime via .env / Railway / Fly variables
+ENV QGIS_SERVER_SERVICE_URL=
 EXPOSE 80
 `;
 };
