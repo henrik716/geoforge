@@ -1,0 +1,540 @@
+{
+  "id": "04qkxb3",
+  "name": "Hospitals",
+  "namespace": "",
+  "description": "Test",
+  "version": "1.0.0",
+  "layers": [
+    {
+      "id": "ciy98w5",
+      "name": "hospitalpoints",
+      "description": "",
+      "properties": [
+        {
+          "id": "onwwtbx",
+          "name": "id",
+          "title": "Id",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "integer"
+          }
+        },
+        {
+          "id": "m40ctl8",
+          "name": "dataset",
+          "title": "Dataset",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "uk52q8l",
+          "name": "featuretype",
+          "title": "FeatureType",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "g1u94ao",
+          "name": "name",
+          "title": "Name",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "c7zdl8f",
+          "name": "type",
+          "title": "Type",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "zziaaut",
+          "name": "emergencydepartment",
+          "title": "EmergencyDepartment",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "nyzlae8",
+          "name": "doctors",
+          "title": "Doctors",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "integer"
+          }
+        },
+        {
+          "id": "xajyeai",
+          "name": "nurses",
+          "title": "Nurses",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "integer"
+          }
+        },
+        {
+          "id": "n2ychux",
+          "name": "operationrooms",
+          "title": "OperationRooms",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "integer"
+          }
+        },
+        {
+          "id": "030uk0t",
+          "name": "beds",
+          "title": "Beds",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "integer"
+          }
+        },
+        {
+          "id": "m0flgzz",
+          "name": "employees",
+          "title": "Employees",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "integer"
+          }
+        },
+        {
+          "id": "sdt8h0r",
+          "name": "address",
+          "title": "Address",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "bkt26tk",
+          "name": "telephonenumber",
+          "title": "TelephoneNumber",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "integer"
+          }
+        },
+        {
+          "id": "m630b6l",
+          "name": "email",
+          "title": "Email",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "ex81hw7",
+          "name": "website",
+          "title": "Website",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "h5vxth2",
+          "name": "latitude",
+          "title": "Latitude",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "number"
+          }
+        },
+        {
+          "id": "npbo7iw",
+          "name": "longitude",
+          "title": "Longitude",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "number"
+          }
+        },
+        {
+          "id": "sqztuwu",
+          "name": "mgrs",
+          "title": "Mgrs",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "ikiuz48",
+          "name": "classification",
+          "title": "Classification",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "1ia8omq",
+          "name": "origin",
+          "title": "Origin",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "aw4z11h",
+          "name": "datawithdrawaldate",
+          "title": "DataWithdrawalDate",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "date"
+          }
+        },
+        {
+          "id": "4w1qlye",
+          "name": "datacapturedate",
+          "title": "DataCaptureDate",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "date"
+          }
+        },
+        {
+          "id": "c9n52a7",
+          "name": "updatedate",
+          "title": "UpdateDate",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "date"
+          }
+        },
+        {
+          "id": "9sp5dyy",
+          "name": "datasetttype",
+          "title": "DatasettType",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "qg9xb0f",
+          "name": "gradering",
+          "title": "Gradering",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "mros59w",
+          "name": "opphav",
+          "title": "Opphav",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "idz1nq2",
+          "name": "dgiffeaturealpha",
+          "title": "DgifFeatureAlpha",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "hsmghnr",
+          "name": "dgiffeature531",
+          "title": "DgifFeature531",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "j3mrf75",
+          "name": "dgifattributealpha",
+          "title": "DgifAttributeAlpha",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "wpvirf3",
+          "name": "dgifattribute531",
+          "title": "DgifAttribute531",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "o54tekw",
+          "name": "dgifvaluealpha",
+          "title": "DgifValueAlpha",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "w7ygkhj",
+          "name": "dgifvalue531",
+          "title": "DgifValue531",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "number"
+          }
+        },
+        {
+          "id": "3j1ros4",
+          "name": "dgifccode",
+          "title": "DgifCCode",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        },
+        {
+          "id": "33xvtal",
+          "name": "uuid",
+          "title": "Uuid",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "string"
+          }
+        }
+      ],
+      "geometryType": "Point",
+      "geometryColumnName": "geom",
+      "style": {
+        "type": "simple",
+        "simpleColor": "#6366F1",
+        "categorizedColors": {},
+        "pointSize": 17,
+        "pointIcon": "triangle",
+        "lineWidth": 2,
+        "lineDash": "solid",
+        "fillOpacity": 0.5,
+        "hatchStyle": "solid",
+        "hatchThickness": 1,
+        "hatchSpacing": 6
+      }
+    },
+    {
+      "id": "rnx7w0r",
+      "name": "areas",
+      "description": "",
+      "properties": [
+        {
+          "id": "rhxn456",
+          "name": "id",
+          "title": "Id",
+          "description": "",
+          "multiplicity": "0..1",
+          "defaultValue": "",
+          "constraints": {},
+          "fieldType": {
+            "kind": "primitive",
+            "baseType": "integer"
+          }
+        }
+      ],
+      "geometryType": "MultiPolygon",
+      "geometryColumnName": "geom",
+      "style": {
+        "type": "simple",
+        "simpleColor": "#6366F1",
+        "categorizedColors": {},
+        "pointSize": 8,
+        "pointIcon": "circle",
+        "lineWidth": 2,
+        "lineDash": "solid",
+        "fillOpacity": 0.75,
+        "hatchStyle": "b_diagonal",
+        "hatchThickness": 1,
+        "hatchSpacing": 6
+      }
+    }
+  ],
+  "sharedTypes": [],
+  "sharedEnums": [],
+  "crs": "EPSG:25833",
+  "createdAt": "2026-03-18T14:01:49.744Z",
+  "updatedAt": "2026-03-18T14:04:49.918Z",
+  "metadata": {
+    "contactName": "Henrik Schuller",
+    "contactEmail": "schhen@kartverket.no",
+    "contactOrganization": "Kartverket",
+    "keywords": [
+      "s",
+      "f",
+      "da"
+    ],
+    "theme": "hb",
+    "license": "CC-BY-4.0",
+    "accessRights": "public",
+    "purpose": "",
+    "accrualPeriodicity": "unknown",
+    "spatialExtent": {
+      "westBoundLongitude": "-50686.015625",
+      "eastBoundLongitude": "1076942.75",
+      "southBoundLatitude": "6468340",
+      "northBoundLatitude": "8683034"
+    },
+    "temporalExtentFrom": "",
+    "temporalExtentTo": ""
+  },
+  "renderingOrder": [
+    "ciy98w5",
+    "rnx7w0r"
+  ]
+}
