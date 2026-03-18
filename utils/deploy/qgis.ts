@@ -293,7 +293,7 @@ export const generateQgisDockerfile = (
   model: DataModel,
   source: SourceConnection
 ): string => {
-  return `FROM kartoza/qgis-server:latest
+  return `FROM qgis/qgis-server:ltr
 
 COPY project.qgs /io/project.qgs
 COPY data /data
