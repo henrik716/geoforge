@@ -366,15 +366,17 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
   );`);
 
   // Create gpkg_data_column_constraints (OGC extension for codelist domains)
+  // One row per enum value; unique constraint on (constraint_name, constraint_type, value) triplet
   db.run(`CREATE TABLE gpkg_data_column_constraints (
-    constraint_name TEXT NOT NULL PRIMARY KEY,
+    constraint_name TEXT NOT NULL,
     constraint_type TEXT NOT NULL CHECK (constraint_type IN ('enum', 'range', 'glob', 'datetime')),
     value TEXT,
     min NUMERIC,
     max NUMERIC,
     min_is_inclusive BOOLEAN,
     max_is_inclusive BOOLEAN,
-    description TEXT
+    description TEXT,
+    CONSTRAINT gdcc_pk UNIQUE (constraint_name, constraint_type, value)
   );`);
 
   // Create gpkg_data_columns (OGC extension for column metadata and constraint linking)
@@ -387,8 +389,7 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
     mime_type TEXT,
     constraint_name TEXT,
     PRIMARY KEY (table_name, column_name),
-    FOREIGN KEY (table_name) REFERENCES gpkg_contents(table_name),
-    FOREIGN KEY (constraint_name) REFERENCES gpkg_data_column_constraints(constraint_name)
+    FOREIGN KEY (table_name) REFERENCES gpkg_contents(table_name)
   );`);
 
   for (const layer of model.layers) {
@@ -529,11 +530,14 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
           // Create unique constraint name
           const constraintName = `${tbl}_${f.name}_enum`;
 
-          // Insert into gpkg_data_column_constraints
-          db.run(
-            `INSERT INTO gpkg_data_column_constraints (constraint_name, constraint_type, value, description) VALUES (?, ?, ?, ?)`,
-            [constraintName, 'enum', codeValues.join(','), f.description || '']
-          );
+          // Insert one row per enum value into gpkg_data_column_constraints
+          // QGIS reads one row per value to build the dropdown list
+          codeValues.forEach(code => {
+            db.run(
+              `INSERT INTO gpkg_data_column_constraints (constraint_name, constraint_type, value) VALUES (?, ?, ?)`,
+              [constraintName, 'enum', code]
+            );
+          });
 
           // Insert into gpkg_data_columns to link the constraint to the column
           db.run(
