@@ -365,6 +365,32 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
     CONSTRAINT fk_gc_srs FOREIGN KEY (srs_id) REFERENCES gpkg_spatial_ref_sys(srs_id)
   );`);
 
+  // Create gpkg_data_column_constraints (OGC extension for codelist domains)
+  db.run(`CREATE TABLE gpkg_data_column_constraints (
+    constraint_name TEXT NOT NULL PRIMARY KEY,
+    constraint_type TEXT NOT NULL CHECK (constraint_type IN ('enum', 'range', 'glob', 'datetime')),
+    value TEXT,
+    min NUMERIC,
+    max NUMERIC,
+    min_is_inclusive BOOLEAN,
+    max_is_inclusive BOOLEAN,
+    description TEXT
+  );`);
+
+  // Create gpkg_data_columns (OGC extension for column metadata and constraint linking)
+  db.run(`CREATE TABLE gpkg_data_columns (
+    table_name TEXT NOT NULL,
+    column_name TEXT NOT NULL,
+    column_type TEXT,
+    title TEXT,
+    description TEXT,
+    mime_type TEXT,
+    constraint_name TEXT,
+    PRIMARY KEY (table_name, column_name),
+    FOREIGN KEY (table_name) REFERENCES gpkg_contents(table_name),
+    FOREIGN KEY (constraint_name) REFERENCES gpkg_data_column_constraints(constraint_name)
+  );`);
+
   for (const layer of model.layers) {
     if (layer.isAbstract) continue;
     const tbl = toTableName(layer.name);
@@ -481,6 +507,40 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
           `INSERT OR IGNORE INTO gpkg_geometry_columns (table_name, column_name, geometry_type_name, srs_id, z, m) VALUES (?, ?, ?, ?, ?, ?)`,
           [tbl, f.name, ft.geometryType, srsId, 0, 0]
         );
+      }
+    });
+
+    // Register codelist fields with enum constraints for QGIS dropdown support
+    effectiveProperties.forEach(f => {
+      if (f.fieldType.kind === 'codelist') {
+        let codeValues: string[] = [];
+        const ft = f.fieldType;
+        if (ft.mode === 'inline' && ft.values?.length > 0) {
+          codeValues = ft.values.map((v: CodeValue) => v.code);
+        } else if (ft.mode === 'shared' && 'enumRef' in ft) {
+          const enumRef = (ft as any).enumRef;
+          const shared = model.sharedEnums?.find(e => e.id === enumRef);
+          if (shared?.values?.length > 0) {
+            codeValues = shared.values.map((v: CodeValue) => v.code);
+          }
+        }
+
+        if (codeValues.length > 0) {
+          // Create unique constraint name
+          const constraintName = `${tbl}_${f.name}_enum`;
+
+          // Insert into gpkg_data_column_constraints
+          db.run(
+            `INSERT INTO gpkg_data_column_constraints (constraint_name, constraint_type, value, description) VALUES (?, ?, ?, ?)`,
+            [constraintName, 'enum', codeValues.join(','), f.description || '']
+          );
+
+          // Insert into gpkg_data_columns to link the constraint to the column
+          db.run(
+            `INSERT INTO gpkg_data_columns (table_name, column_name, column_type, title, description, constraint_name) VALUES (?, ?, ?, ?, ?, ?)`,
+            [tbl, f.name, 'TEXT', f.title || f.name, f.description || '', constraintName]
+          );
+        }
       }
     });
   }
