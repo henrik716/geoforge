@@ -369,7 +369,7 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
   // One row per enum value; unique constraint on (constraint_name, constraint_type, value) triplet
   db.run(`CREATE TABLE gpkg_data_column_constraints (
     constraint_name TEXT NOT NULL,
-    constraint_type TEXT NOT NULL CHECK (constraint_type IN ('enum', 'range', 'glob', 'datetime')),
+    constraint_type TEXT NOT NULL CHECK (constraint_type IN ('range', 'enum', 'glob')),
     value TEXT,
     min NUMERIC,
     max NUMERIC,
@@ -391,6 +391,26 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
     PRIMARY KEY (table_name, column_name),
     FOREIGN KEY (table_name) REFERENCES gpkg_contents(table_name)
   );`);
+
+  // Create gpkg_extensions (required to declare active extensions so QGIS recognizes gpkg_schema)
+  db.run(`CREATE TABLE gpkg_extensions (
+    table_name TEXT,
+    column_name TEXT,
+    extension_name TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    CONSTRAINT ge_tce UNIQUE (table_name, column_name, extension_name)
+  );`);
+
+  // Register the Schema extension for gpkg_data_columns and gpkg_data_column_constraints
+  db.run(
+    `INSERT INTO gpkg_extensions (table_name, column_name, extension_name, definition, scope) VALUES (?, ?, ?, ?, ?)`,
+    ['gpkg_data_columns', null, 'gpkg_schema', 'http://www.geopackage.org/spec120/#extension_schema', 'read-write']
+  );
+  db.run(
+    `INSERT INTO gpkg_extensions (table_name, column_name, extension_name, definition, scope) VALUES (?, ?, ?, ?, ?)`,
+    ['gpkg_data_column_constraints', null, 'gpkg_schema', 'http://www.geopackage.org/spec120/#extension_schema', 'read-write']
+  );
 
   for (const layer of model.layers) {
     if (layer.isAbstract) continue;
@@ -543,6 +563,12 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
           db.run(
             `INSERT INTO gpkg_data_columns (table_name, column_name, column_type, title, description, constraint_name) VALUES (?, ?, ?, ?, ?, ?)`,
             [tbl, f.name, 'TEXT', f.title || f.name, f.description || '', constraintName]
+          );
+
+          // Register this constrained column in gpkg_extensions
+          db.run(
+            `INSERT OR IGNORE INTO gpkg_extensions (table_name, column_name, extension_name, definition, scope) VALUES (?, ?, ?, ?, ?)`,
+            [tbl, f.name, 'gpkg_schema', 'http://www.geopackage.org/spec120/#extension_schema', 'read-write']
           );
         }
       }
