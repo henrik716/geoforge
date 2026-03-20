@@ -1,4 +1,4 @@
-import { DataModel, GeometryType, Field, FieldType, SharedType } from '../types';
+import { DataModel, GeometryType, GeometryFieldType, Field, FieldType, CodeValue, SharedType } from '../types';
 import type { Translations } from '../i18n/index';
 import { getEffectiveProperties } from './modelUtils';
 import { COLORS } from '../constants';
@@ -305,6 +305,10 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
   const SQL = await initSqlJs({ locateFile: () => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.wasm` });
   const db = new SQL.Database();
 
+  // Parse CRS from model (format: "EPSG:XXXXX")
+  const epsgMatch = model.crs?.match(/EPSG:(\d+)/i);
+  const srsId = epsgMatch ? parseInt(epsgMatch[1]) : 4326;
+
   // Set GeoPackage-specific PRAGMAs
   db.run("PRAGMA application_id = 1196444487;");  // 0x47504B47 = "GPKG"
   db.run("PRAGMA user_version = 10200;");          // GeoPackage 1.2.0
@@ -323,6 +327,14 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
   db.run("INSERT INTO gpkg_spatial_ref_sys VALUES('Undefined cartesian SRS',-1,'NONE',-1,'undefined',NULL);");
   db.run("INSERT INTO gpkg_spatial_ref_sys VALUES('Undefined geographic SRS',0,'NONE',0,'undefined',NULL);");
   db.run("INSERT INTO gpkg_spatial_ref_sys VALUES('WGS 84 geodetic',4326,'EPSG',4326,'GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]',NULL);");
+
+  // Insert model's CRS if different from 4326
+  if (srsId !== 4326) {
+    db.run(
+      "INSERT OR IGNORE INTO gpkg_spatial_ref_sys (srs_name, srs_id, organization, organization_coordsys_id, definition) VALUES (?, ?, ?, ?, ?)",
+      [`EPSG:${srsId}`, srsId, 'EPSG', srsId, 'undefined']
+    );
+  }
 
   // Create gpkg_contents (required system table for feature layer metadata)
   db.run(`CREATE TABLE gpkg_contents (
@@ -374,9 +386,33 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
       let colDef = hasDeclaredPk && idx === 0 ? '' : ',';
       colDef += ` "${f.name}" ${type}`;
       if (isRequired(f)) colDef += ' NOT NULL';
+
+      // Add DEFAULT clause if specified
+      if (f.defaultValue !== undefined && f.defaultValue !== null && f.defaultValue !== '') {
+        const escaped = f.defaultValue.replace(/'/g, "''");
+        colDef += ` DEFAULT '${escaped}'`;
+      }
+
       if (f.constraints?.isPrimaryKey && pkFields.length === 1) colDef += ' PRIMARY KEY';
       else if (f.constraints?.isUnique) colDef += ' UNIQUE';
-      
+
+      // Add CHECK constraints for codelist values
+      if (ft.kind === 'codelist') {
+        let codeValues: string[] = [];
+        if (ft.mode === 'inline' && ft.values?.length > 0) {
+          codeValues = ft.values.map((v: CodeValue) => v.code);
+        } else if (ft.mode === 'shared' && ft.enumRef) {
+          const shared = model.sharedEnums?.find(e => e.id === ft.enumRef);
+          if (shared?.values?.length > 0) {
+            codeValues = shared.values.map((v: CodeValue) => v.code);
+          }
+        }
+        if (codeValues.length > 0) {
+          const vals = codeValues.map(c => `'${c.replace(/'/g, "''")}'`).join(', ');
+          colDef += ` CHECK ("${f.name}" IN (${vals}))`;
+        }
+      }
+
       // Foreign Key logikk
       if (ft.kind === 'feature-ref' && ft.relationType === 'foreign_key') {
         const targetLayer = model.layers.find(l => l.id === ft.layerId);
@@ -424,8 +460,8 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
 
     // Insert metadata into gpkg_contents
     db.run(
-      `INSERT INTO gpkg_contents (table_name, data_type, identifier, srs_id) VALUES (?, ?, ?, ?)`,
-      [tbl, 'features', tbl, 4326]
+      `INSERT INTO gpkg_contents (table_name, data_type, identifier, description, srs_id) VALUES (?, ?, ?, ?, ?)`,
+      [tbl, 'features', tbl, layer.description || '', srsId]
     );
 
     // Insert geometry column metadata if layer has geometry
@@ -433,9 +469,20 @@ export const exportGeoPackage = async (model: DataModel, filename: string) => {
       const geomCol = layer.geometryColumnName || 'geom';
       db.run(
         `INSERT INTO gpkg_geometry_columns (table_name, column_name, geometry_type_name, srs_id, z, m) VALUES (?, ?, ?, ?, ?, ?)`,
-        [tbl, geomCol, layer.geometryType, 4326, 0, 0]
+        [tbl, geomCol, layer.geometryType, srsId, 0, 0]
       );
     }
+
+    // Register secondary geometry fields in gpkg_geometry_columns
+    effectiveProperties.forEach(f => {
+      if (f.fieldType.kind === 'geometry') {
+        const ft = f.fieldType as GeometryFieldType;
+        db.run(
+          `INSERT OR IGNORE INTO gpkg_geometry_columns (table_name, column_name, geometry_type_name, srs_id, z, m) VALUES (?, ?, ?, ?, ?, ?)`,
+          [tbl, f.name, ft.geometryType, srsId, 0, 0]
+        );
+      }
+    });
   }
   
   const binary = db.export();
