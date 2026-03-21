@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createVerify } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const DIST = join(__dirname, 'dist');
@@ -26,36 +26,45 @@ function isPrivateIp(hostname) {
   if (ip === 'localhost' || ip === '127.0.0.1' || ip === '::1' || ip === '0.0.0.0') return true;
   if (ip.startsWith('127.')) return true;
   if (ip.startsWith('10.')) return true;
-  if (ip.startsWith('172.') && ip.split('.')[1] >= 16 && ip.split('.')[1] <= 31) return true;
+  // 172.16-31.x.x (RFC 1918 private range)
+  const parts = ip.split('.');
+  if (parts[0] === '172') {
+    const second = parseInt(parts[1], 10);
+    if (second >= 16 && second <= 31) return true;
+  }
   if (ip.startsWith('192.168.')) return true;
+  if (ip.startsWith('169.254.')) return true; // Link-local (AWS/GCP metadata: 169.254.169.254)
   if (ip.startsWith('::ffff:127.')) return true; // IPv6 localhost
   if (ip.startsWith('fc00:') || ip.startsWith('fd00:')) return true; // IPv6 private
   return false;
 }
 
-// Helper: validate Supabase JWT locally using its public key
-// (Note: This is a simplified version; for production, fetch public keys from jwks URL)
-function validateSupabaseJwt(token, jwtSecret) {
+// Helper: validate Supabase JWT locally using HMAC-SHA256
+function validateSupabaseJwt(authHeader, jwtSecret) {
   if (!jwtSecret) return true; // No secret set, skip JWT validation
-  if (!token) return false;
+  if (!authHeader) return false;
 
   try {
     // Remove 'Bearer ' prefix if present
-    const actualToken = token.startsWith('Bearer ') ? token.slice(7) : token;
-    const parts = actualToken.split('.');
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+    const parts = token.split('.');
     if (parts.length !== 3) return false;
 
-    // Verify signature: base64url(header).base64url(payload) with HMAC-SHA256
-    const header = JSON.parse(Buffer.from(parts[0], 'base64').toString());
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-    const signature = parts[2];
+    // Verify HMAC-SHA256 signature
+    const expected = createHmac('sha256', jwtSecret)
+      .update(`${parts[0]}.${parts[1]}`)
+      .digest();
+    // Decode signature from base64url (replace - with + and _ with /)
+    const actual = Buffer.from(parts[2].replace(/-/g, '+').replace(/_/g, '/'), 'base64');
 
-    // Simple HMAC-SHA256 verification
-    const verify = createVerify('sha256');
-    verify.update(`${parts[0]}.${parts[1]}`);
-    const decoded = Buffer.from(signature, 'base64');
-    const isValid = verify.verify(jwtSecret, decoded);
-    return isValid;
+    if (expected.length !== actual.length) return false;
+    if (!timingSafeEqual(expected, actual)) return false;
+
+    // Check expiry (exp claim in JWT payload)
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return false;
+
+    return true;
   } catch (err) {
     console.warn('JWT validation error:', err.message);
     return false;
@@ -162,7 +171,7 @@ async function handlePostgisSchema(req, res) {
   } catch (err) {
     console.error('PostGIS schema error:', err);
     res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Internal server error', details: err.message }));
+    res.end(JSON.stringify({ error: 'Failed to read database schema' }));
   }
 }
 
