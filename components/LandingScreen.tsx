@@ -11,12 +11,13 @@ interface LandingScreenProps {
   onImportFile: () => void;
   onImportUrl: () => void;
   onImportGithub: () => void;
+  onImportDatabase: () => void;
   onSelectModel: (id: string) => void;
   isParsing: boolean;
 }
 
 const LandingScreen: React.FC<LandingScreenProps> = ({
-  t, models, onDropGpkg, onNewModel, onImportFile, onImportUrl, onImportGithub, onSelectModel, isParsing
+  t, models, onDropGpkg, onNewModel, onImportFile, onImportUrl, onImportGithub, onImportDatabase, onSelectModel, isParsing
 }) => {
   const l = t.landing || {};
   const [isDragOver, setIsDragOver] = useState(false);
@@ -92,6 +93,14 @@ const LandingScreen: React.FC<LandingScreenProps> = ({
               )}
             </div>
 
+            <button
+              onClick={onImportDatabase}
+              className="text-xs font-semibold text-slate-400 hover:text-emerald-500 transition-colors flex items-center justify-center gap-1.5 mx-auto"
+            >
+              <Database size={13} />
+              {l.connectDatabase || 'or connect to a database'}
+            </button>
+
             <input
               ref={fileInputRef}
               type="file"
@@ -155,6 +164,17 @@ const LandingScreen: React.FC<LandingScreenProps> = ({
                   <Github size={20} />
                 </div>
                 <span className="text-sm font-bold text-slate-700">{l.modelImportGithub}</span>
+                <ArrowRight size={16} className="ml-auto text-slate-300 group-hover/btn:text-indigo-400 transition-colors" />
+              </button>
+
+              <button
+                onClick={onImportDatabase}
+                className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 text-left transition-all group/btn"
+              >
+                <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 group-hover/btn:bg-indigo-100 group-hover/btn:text-indigo-500 transition-colors">
+                  <Database size={20} />
+                </div>
+                <span className="text-sm font-bold text-slate-700">{l.modelImportDatabase || 'Import from database'}</span>
                 <ArrowRight size={16} className="ml-auto text-slate-300 group-hover/btn:text-indigo-400 transition-colors" />
               </button>
             </div>

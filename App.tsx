@@ -14,6 +14,7 @@ import QuickPublish from './components/QuickPublish';
 import Header from './components/Header';
 import MobileNav from './components/MobileNav';
 import { ConfirmDeleteDialog, GithubImportDialog, UrlImportDialog } from './components/dialogs';
+import DatabaseImportDialog from './components/dialogs/DatabaseImportDialog';
 import { useHistory } from './hooks/useHistory';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { usePanelResize } from './hooks/usePanelResize';
@@ -40,6 +41,7 @@ const App: React.FC = () => {
   const [showGuide, setShowGuide] = useState(() => !localStorage.getItem('guide_seen'));
   const [showGithubImport, setShowGithubImport] = useState(false);
   const [showUrlImport, setShowUrlImport] = useState(false);
+  const [showDatabaseImport, setShowDatabaseImport] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<string | null>(null);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -251,6 +253,11 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDatabaseImportSuccess = (model: DataModel) => {
+    setShowDatabaseImport(false);
+    handleImportModel(model);
+  };
+
   // Validate current model for deploy tab
   const validateForDeploy = async (model: DataModel) => {
     try {
@@ -303,6 +310,7 @@ const App: React.FC = () => {
       {showGuide && <Guide onClose={() => { setShowGuide(false); localStorage.setItem('guide_seen', 'true'); }} t={t} />}
       {showGithubImport && <GithubImportDialog t={t} onClose={() => setShowGithubImport(false)} onImport={handleImportModel} />}
       {showUrlImport && <UrlImportDialog t={t} onClose={() => setShowUrlImport(false)} onImport={handleUrlImportSuccess} />}
+      {showDatabaseImport && <DatabaseImportDialog t={t} onClose={() => setShowDatabaseImport(false)} onImport={handleDatabaseImportSuccess} />}
       {modelToDelete && <ConfirmDeleteDialog t={t} onClose={() => setModelToDelete(null)} onConfirm={() => handleDeleteModel(modelToDelete)} />}
 
       <Header t={t} lang={lang} onLangChange={setLang} onShowGuide={() => setShowGuide(true)} onHome={() => setActiveTab('landing')} />
@@ -317,6 +325,7 @@ const App: React.FC = () => {
           onImportFile={() => fileInputRef.current?.click()}
           onImportUrl={() => setShowUrlImport(true)}
           onImportGithub={() => setShowGithubImport(true)}
+          onImportDatabase={() => setShowDatabaseImport(true)}
           onSelectModel={(id) => {
             setSelectedId(id);
             setActiveTab('editor');
@@ -367,14 +376,15 @@ const App: React.FC = () => {
               setDeployValidation(null);
               setActiveTab('editor'); 
             }} 
-            onNew={handleNewModel} 
-            onImportGis={() => fileInputRef.current?.click()} 
+            onNew={handleNewModel}
+            onImportGis={() => fileInputRef.current?.click()}
             onImportUrl={() => setShowUrlImport(true)}
-            onGithubImport={() => setShowGithubImport(true)} 
-            onDelete={(id) => setModelToDelete(id)} 
-            onOpenMapper={() => setActiveTab('mapper')} 
+            onImportDatabase={() => setShowDatabaseImport(true)}
+            onGithubImport={() => setShowGithubImport(true)}
+            onDelete={(id) => setModelToDelete(id)}
+            onOpenMapper={() => setActiveTab('mapper')}
             onOpenDeploy={() => setActiveTab('deploy')}
-            t={t} 
+            t={t}
           />
         </div>
 
