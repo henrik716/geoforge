@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Translations } from '../../i18n/index';
 import type { DataModel } from '../../types';
-import { X, Loader2, Copy } from 'lucide-react';
+import { X, Loader2 } from 'lucide-react';
 import { processSupabaseSchemaToModel } from '../../utils/supabaseSchemaService';
 import { processPostgisSchemaToModel } from '../../utils/postgisSchemaService';
 
@@ -17,7 +17,6 @@ const DatabaseImportDialog: React.FC<DatabaseImportDialogProps> = ({ t, onClose,
   const [sourceType, setSourceType] = useState<SourceType>('supabase');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showSqlSnippet, setShowSqlSnippet] = useState(false);
 
   // Supabase form
   const [supabaseUrl, setSupabaseUrl] = useState('');
@@ -57,24 +56,6 @@ const DatabaseImportDialog: React.FC<DatabaseImportDialogProps> = ({ t, onClose,
     }
   };
 
-  const sqlSnippet = `create or replace function get_schema_info(target_schema text default 'public')
-returns json language sql security definer as $$
-  select json_agg(t) from (
-    select
-      c.table_name, c.column_name, c.data_type, c.udt_name,
-      c.is_nullable, c.column_default, tc.constraint_type
-    from information_schema.columns c
-    left join information_schema.key_column_usage kcu
-      on c.table_schema = kcu.table_schema
-      and c.table_name = kcu.table_name
-      and c.column_name = kcu.column_name
-    left join information_schema.table_constraints tc
-      on kcu.constraint_name = tc.constraint_name
-      and kcu.table_schema = tc.table_schema
-    where c.table_schema = target_schema
-    order by c.table_name, c.ordinal_position
-  ) t
-$$;`;
 
   return (
     <div className="fixed inset-0 z-[300] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
@@ -169,31 +150,6 @@ $$;`;
                 />
               </div>
 
-              {/* SQL Info */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
-                <button
-                  onClick={() => setShowSqlSnippet(!showSqlSnippet)}
-                  className="text-xs font-semibold text-blue-700 hover:text-blue-900 transition-colors"
-                >
-                  {showSqlSnippet ? '▼' : '▶'} {labels.sqlNote || 'Deploy SQL function first'}
-                </button>
-                {showSqlSnippet && (
-                  <div className="space-y-2">
-                    <pre className="text-[10px] bg-white p-2 rounded border border-blue-200 overflow-x-auto max-h-48 overflow-y-auto font-mono text-slate-700">
-                      {sqlSnippet}
-                    </pre>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(sqlSnippet);
-                      }}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-white hover:bg-blue-50 border border-blue-200 rounded text-xs font-semibold text-blue-700 transition-colors"
-                    >
-                      <Copy size={12} />
-                      {labels.copySql || 'Copy'}
-                    </button>
-                  </div>
-                )}
-              </div>
             </div>
           )}
 
