@@ -71,6 +71,17 @@ function validateSupabaseJwt(authHeader, jwtSecret) {
   }
 }
 
+// Helper: scrub password from connection string for safe logging
+function scrubConnectionString(cs) {
+  try {
+    const u = new URL(cs.includes('://') ? cs : `postgresql://${cs}`);
+    if (u.password) u.password = '***';
+    return u.toString();
+  } catch {
+    return '[unparseable connection string]';
+  }
+}
+
 async function handlePostgisSchema(req, res) {
   const allowedOrigin = process.env.APP_ORIGIN || req.headers.origin || '';
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
@@ -103,9 +114,10 @@ async function handlePostgisSchema(req, res) {
     }
 
     // SSRF protection: check hostname
+    let pgUrl;
     try {
-      const url = new URL(connectionString.includes('://') ? connectionString : `postgresql://${connectionString}`);
-      if (isPrivateIp(url.hostname)) {
+      pgUrl = new URL(connectionString.includes('://') ? connectionString : `postgresql://${connectionString}`);
+      if (isPrivateIp(pgUrl.hostname)) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Private IP addresses are not allowed' }));
         return;
@@ -119,11 +131,21 @@ async function handlePostgisSchema(req, res) {
       }
     }
 
+    // Force sslmode=require if not already specified
+    if (pgUrl && !pgUrl.searchParams.get('sslmode')) {
+      pgUrl.searchParams.set('sslmode', 'require');
+    }
+
     // Dynamically import pg (node-postgres)
     const { Pool } = await import('pg');
     const targetSchema = schema || 'public';
 
-    const pool = new Pool({ connectionString });
+    const pool = new Pool({
+      connectionString: pgUrl ? pgUrl.toString() : connectionString,
+      connectionTimeoutMillis: 5000,   // 5 s to connect
+      query_timeout: 10000,            // 10 s per query
+      statement_timeout: 10000,
+    });
 
     try {
       // Query information_schema
@@ -169,7 +191,7 @@ async function handlePostgisSchema(req, res) {
       await pool.end();
     }
   } catch (err) {
-    console.error('PostGIS schema error:', err);
+    console.error('PostGIS schema error (conn: %s):', scrubConnectionString(connectionString), err.message);
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Failed to read database schema' }));
   }
