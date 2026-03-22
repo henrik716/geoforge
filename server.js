@@ -122,9 +122,9 @@ async function handlePostgisSchema(req, res) {
         res.end(JSON.stringify({ error: 'Private IP addresses are not allowed' }));
         return;
       }
-      // Force sslmode=require if not already specified
+      // Set sslmode=prefer if not already specified (use SSL if available, fall back to non-SSL)
       if (!pgUrl.searchParams.get('sslmode')) {
-        pgUrl.searchParams.set('sslmode', 'require');
+        pgUrl.searchParams.set('sslmode', 'prefer');
       }
       finalConnectionString = pgUrl.toString();
     } catch {
