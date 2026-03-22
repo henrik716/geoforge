@@ -122,12 +122,7 @@ async function handlePostgisSchema(req, res) {
         res.end(JSON.stringify({ error: 'Private IP addresses are not allowed' }));
         return;
       }
-      // Set sslmode=prefer if not already specified (use SSL if available, fall back to non-SSL)
-      if (!pgUrl.searchParams.get('sslmode')) {
-        pgUrl.searchParams.set('sslmode', 'prefer');
-      }
-      finalConnectionString = pgUrl.toString();
-    } catch {
+    } catch (err) {
       // If we can't parse the connection string, try simple pattern matching
       if (isPrivateIp(connectionString.split('@')[1]?.split(':')[0] || connectionString)) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -190,6 +185,7 @@ async function handlePostgisSchema(req, res) {
     }
   } catch (err) {
     console.error('PostGIS schema error (conn: %s):', scrubConnectionString(connectionString), err.message);
+    console.error('Full error:', err);
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Failed to read database schema' }));
   }
