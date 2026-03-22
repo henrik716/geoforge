@@ -143,7 +143,6 @@ async function handlePostgisSchema(req, res) {
     const pool = new Pool({
       connectionString: finalConnectionString,
       connectionTimeoutMillis: 5000,   // 5 s to connect
-      statement_timeout: 10000,        // 10 s per query
     });
 
     try {
