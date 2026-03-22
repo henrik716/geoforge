@@ -185,7 +185,6 @@ async function handlePostgisSchema(req, res) {
     }
   } catch (err) {
     console.error('PostGIS schema error (conn: %s):', scrubConnectionString(connectionString), err.message);
-    console.error('Full error:', err);
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Failed to read database schema' }));
   }
