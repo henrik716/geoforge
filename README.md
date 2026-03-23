@@ -5,6 +5,7 @@
 [![React](https://img.shields.io/badge/React-19-61dafb?logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript)](https://www.typescriptlang.org)
 [![Vite](https://img.shields.io/badge/Vite-6-646cff?logo=vite)](https://vitejs.dev)
+[![Supabase](https://img.shields.io/badge/Supabase-2-3ecf8e?logo=supabase)](https://supabase.com)
 
 </div>
 
@@ -56,6 +57,8 @@ Optionally connect a Claude or Gemini API key to get:
 | Frontend | React 19, TypeScript, Vite 6 |
 | Geospatial | GDAL3.js, jszip |
 | Icons | Lucide React |
+| Database & Auth | Supabase, PostGIS (`pg`) |
+| Serialization | `js-yaml` |
 | Backend (generated) | pygeoapi, QGIS Server |
 | Deployment targets | Docker, Fly.io, Railway, GitHub Actions |
 
