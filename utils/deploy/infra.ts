@@ -119,6 +119,7 @@ services:
       - "5000:80"
     volumes:
       - ./pygeoapi-config.yml:/pygeoapi/local.config.yml
+      - ./templates:/pygeoapi/local-templates:ro
 `;
 
   if (!isPg) {
@@ -235,6 +236,8 @@ export const generateDockerfile = (
 # Copy configuration
 COPY pygeoapi-config.yml /pygeoapi/local.config.yml
 ${isGpkg ? 'COPY data/ /data/' : ''}
+# Copy custom templates to the path defined in pygeoapi-config.yml
+COPY templates/ /pygeoapi/local-templates/
 
 # FIX: Default env vars so the container starts correctly when no .env is present.
 # PORT is overridden automatically by Railway. PYGEOAPI_SERVER_URL must be set
