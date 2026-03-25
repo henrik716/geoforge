@@ -1,3 +1,8 @@
+> [!WARNING]
+> **This repository has been moved.** Active development continues at [henrik716/waystones](https://github.com/henrik716/waystones). This repository is no longer maintained.
+
+---
+
 # GeoForge
 
 **Design, model, and deploy geospatial data services — no backend expertise required.**
